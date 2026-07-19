@@ -6,6 +6,7 @@ dist/
 *.spec
 .coverage
 htmlcov/
+tests/fixtures/*.pdf
 
 # Local Python environments and secrets
 venv/

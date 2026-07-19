@@ -35,7 +35,11 @@ APP_NAME = "Markdown Quick Memo"
 DEFAULT_GEOMETRY = "760x620"
 RENDER_DELAY_MS = 140
 LIST_BULLET_FONT_SIZE = 9
+LIST_HOLLOW_BULLET_FONT_SIZE = 6
 LIST_NUMBER_FONT_SIZE = 10
+TABLE_LINE_COLOR = "#94a3b8"
+TABLE_LINE_WIDTH = 1
+TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 INLINE_MATH_FONT_SIZE = 8
 DISPLAY_MATH_FONT_SIZE = 15
@@ -153,14 +157,17 @@ class MarkdownQuickMemoApp:
 
         header = ttk.Frame(main)
         header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=1)
         ttk.Label(header, text=APP_NAME, style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        self.status_text = tk.StringVar()
+        self.status_label = ttk.Label(header, textvariable=self.status_text, anchor="center")
+        self.status_label.grid(row=0, column=1, sticky="ew", padx=10)
         ttk.Checkbutton(
             header,
             text="記号を隠す",
             variable=self.hide_markers,
             command=self.render_markdown,
-        ).grid(row=0, column=1, sticky="e")
+        ).grid(row=0, column=2, sticky="e")
 
         editor_frame = ttk.Frame(main, style="Editor.TFrame", padding=1)
         editor_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -194,11 +201,6 @@ class MarkdownQuickMemoApp:
         ttk.Button(self.search_frame, text="次へ", width=6, command=self.find_next).grid(row=0, column=3, padx=2)
         ttk.Button(self.search_frame, text="閉じる", width=6, command=self.hide_search).grid(row=0, column=4, padx=(2, 0))
 
-        self.status_text = tk.StringVar()
-        ttk.Label(main, textvariable=self.status_text, anchor="w").grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0)
-        )
-
         self._build_menu()
         style = ttk.Style(self.root)
         style.configure("Title.TLabel", font=(self._latin_font_family, 11, "bold"))
@@ -211,6 +213,12 @@ class MarkdownQuickMemoApp:
         file_menu.add_separator()
         file_menu.add_command(label="上書き保存", accelerator="Ctrl+S", command=self.save)
         file_menu.add_command(label="名前を付けて保存...", accelerator="Ctrl+Shift+S", command=self.save_as)
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="PDFに書き出す",
+            accelerator="Ctrl+Shift+P",
+            command=self.export_pdf,
+        )
         file_menu.add_separator()
         file_menu.add_command(label="閉じる", accelerator="Ctrl+Q", command=self.close)
         menu.add_cascade(label="ファイル", menu=file_menu)
@@ -362,6 +370,7 @@ class MarkdownQuickMemoApp:
             "<Control-q>": self.close,
             "<Control-f>": self.show_search,
             "<Control-t>": self.show_table_dialog,
+            "<Control-Shift-P>": self.export_pdf,
             "<Control-b>": lambda event=None: self.wrap_selection("**"),
             "<Control-i>": lambda event=None: self.wrap_selection("*"),
             "<Control-Shift-X>": lambda event=None: self.wrap_selection("~~"),
@@ -575,6 +584,7 @@ class MarkdownQuickMemoApp:
             else:
                 widget = self._create_math_widget(decoration)  # type: ignore[arg-type]
             self.editor.window_create(start_mark, window=widget, align="center")
+            self._bind_editor_decoration_events(widget)
             self._decoration_widgets.append(widget)
 
         for _offset, _decoration_type, _decoration, start_mark, end_mark in prepared_decorations:
@@ -598,7 +608,12 @@ class MarkdownQuickMemoApp:
         return container
 
     def _create_list_marker_widget(self, marker: ListMarker) -> tk.Label:
-        font_size = LIST_NUMBER_FONT_SIZE if marker.ordered else LIST_BULLET_FONT_SIZE
+        if marker.ordered:
+            font_size = LIST_NUMBER_FONT_SIZE
+        elif marker.label == "○":
+            font_size = LIST_HOLLOW_BULLET_FONT_SIZE
+        else:
+            font_size = LIST_BULLET_FONT_SIZE
         return tk.Label(
             self.editor,
             text=marker.label,
@@ -777,7 +792,11 @@ class MarkdownQuickMemoApp:
             else 34
             for analysis_row in cell_analyses
         ]
-        table_height = sum(row_heights) + max(0, len(table.rows) - 1)
+        separator_widths = [
+            TABLE_STRONG_LINE_WIDTH if row_index in {0, len(table.rows) - 1} else TABLE_LINE_WIDTH
+            for row_index in range(len(table.rows))
+        ]
+        table_height = sum(row_heights) + TABLE_STRONG_LINE_WIDTH + sum(separator_widths)
         container = tk.Frame(
             self.editor,
             background="#ffffff",
@@ -789,8 +808,17 @@ class MarkdownQuickMemoApp:
         for column in range(column_count):
             container.grid_columnconfigure(column, weight=1, uniform="markdown_table")
 
+        container.grid_rowconfigure(0, minsize=TABLE_STRONG_LINE_WIDTH)
+        top_border = tk.Frame(
+            container,
+            background=TABLE_LINE_COLOR,
+            borderwidth=0,
+            height=TABLE_STRONG_LINE_WIDTH,
+        )
+        top_border.grid(row=0, column=0, columnspan=column_count, sticky="ew")
+
         for row_index, row in enumerate(table.rows):
-            grid_row = row_index * 2
+            grid_row = row_index * 2 + 1
             container.grid_rowconfigure(grid_row, minsize=row_heights[row_index])
             for column, value in enumerate(row):
                 alignment = table.alignments[column]
@@ -803,11 +831,51 @@ class MarkdownQuickMemoApp:
                     cell_analyses[row_index][column],
                 )
                 cell_widget.grid(row=grid_row, column=column, sticky="ew")
-            if row_index < len(table.rows) - 1:
-                container.grid_rowconfigure(grid_row + 1, minsize=1)
-                separator = ttk.Separator(container, orient="horizontal")
-                separator.grid(row=grid_row + 1, column=0, columnspan=column_count, sticky="ew")
+            separator_width = separator_widths[row_index]
+            container.grid_rowconfigure(grid_row + 1, minsize=separator_width)
+            separator = tk.Frame(
+                container,
+                background=TABLE_LINE_COLOR,
+                borderwidth=0,
+                height=separator_width,
+            )
+            separator.grid(row=grid_row + 1, column=0, columnspan=column_count, sticky="ew")
+
         return container
+
+    def _bind_editor_decoration_events(
+        self,
+        widget: tk.Widget,
+        decoration_widget: tk.Widget | None = None,
+    ) -> None:
+        decoration_widget = decoration_widget or widget
+        widget.bind("<MouseWheel>", self._forward_editor_mousewheel, add="+")
+        widget.bind(
+            "<Button-1>",
+            lambda _event, target=decoration_widget: self._activate_decoration_line(target),
+            add="+",
+        )
+        for child in widget.winfo_children():
+            self._bind_editor_decoration_events(child, decoration_widget)
+
+    def _activate_decoration_line(self, widget: tk.Widget) -> str:
+        try:
+            window_index = self.editor.index(str(widget))
+        except tk.TclError:
+            return "break"
+        self.editor.mark_set("insert", f"{window_index} + 1c")
+        self.editor.focus_set()
+        self.render_markdown()
+        return "break"
+
+    def _forward_editor_mousewheel(self, event: tk.Event) -> str | None:
+        delta = int(getattr(event, "delta", 0))
+        if delta == 0:
+            return None
+        direction = -1 if delta > 0 else 1
+        scroll_units = max(1, abs(delta) // 120)
+        self.editor.yview_scroll(direction * scroll_units, "units")
+        return "break"
 
     def _highlight_current_line(self) -> None:
         self.editor.tag_remove("current_line", "1.0", "end")
@@ -905,6 +973,41 @@ class MarkdownQuickMemoApp:
         self.editor.edit_modified(False)
         self._update_title_and_status(message="保存しました")
         return self.current_path
+
+    def export_pdf(self, _event: tk.Event | None = None) -> str:
+        if self.current_path is None or self.dirty:
+            markdown_path = self.save()
+            if markdown_path is None:
+                return self._break()
+        else:
+            markdown_path = self.current_path
+
+        pdf_path = markdown_path.with_suffix(".pdf")
+        if pdf_path.exists() and not messagebox.askyesno(
+            APP_NAME,
+            f"{pdf_path.name} は既に存在します。上書きしますか？",
+            parent=self.root,
+        ):
+            return self._break()
+
+        markdown_text = self.editor.get("1.0", "end-1c")
+        self._update_title_and_status(message="PDFを書き出しています...")
+        self.root.update_idletasks()
+        try:
+            from .pdf_exporter import export_markdown_to_pdf
+
+            exported_path = export_markdown_to_pdf(markdown_text, markdown_path, pdf_path)
+        except Exception as error:
+            messagebox.showerror(
+                APP_NAME,
+                f"PDFを書き出せませんでした。\n\n{error}",
+                parent=self.root,
+            )
+            self._update_title_and_status(message="PDFの書き出しに失敗しました")
+            return self._break()
+
+        self._update_title_and_status(message=f"PDFを書き出しました: {exported_path.name}")
+        return self._break()
 
     def close(self, _event: tk.Event | None = None) -> str:
         if self._confirm_discard():
