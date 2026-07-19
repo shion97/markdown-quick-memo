@@ -1,12 +1,19 @@
 import tkinter as tk
 from tkinter import font as tkfont
+from tkinter import ttk
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from markdown_quick_memo.app import (
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
     MarkdownQuickMemoApp,
+    TABLE_LINE_COLOR,
+    TABLE_LINE_WIDTH,
+    TABLE_STRONG_LINE_WIDTH,
     build_table_template,
 )
 from markdown_quick_memo.math_renderer import is_math_renderer_preloaded, render_math_png
@@ -48,6 +55,13 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("marker_hidden", self.app.editor.tag_names())
         self.assertEqual(len(self.app._analysis.links), 1)
         self.assertEqual(len(self.app._decoration_widgets), 5)
+        self.assertTrue(
+            all(
+                widget.bind("<MouseWheel>") and widget.bind("<Button-1>")
+                for decoration in self.app._decoration_widgets
+                for widget in (decoration, *_descendants(decoration))
+            )
+        )
         self.assertFalse(self.app.dirty)
         image_widgets = []
         for widget in self.app._decoration_widgets:
@@ -94,16 +108,60 @@ class GuiSmokeTests(unittest.TestCase):
             if isinstance(widget, tk.Label) and widget.cget("text") == "○"
         )
         bullet_font = tkfont.Font(font=bullet_widget.cget("font"))
-        self.assertEqual(bullet_font.actual("size"), 9)
+        self.assertEqual(bullet_font.actual("size"), 6)
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
 
     def test_view_menu_is_removed_and_table_shortcut_is_bound(self) -> None:
         menu = self.root.nametowidget(self.root.cget("menu"))
         labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        file_menu = self.root.nametowidget(menu.entrycget(0, "menu"))
+        file_labels = [
+            file_menu.entrycget(index, "label")
+            for index in range(file_menu.index("end") + 1)
+            if file_menu.type(index) != "separator"
+        ]
 
         self.assertEqual(labels, ["ファイル", "編集"])
+        self.assertIn("PDFに書き出す", file_labels)
         self.assertTrue(self.root.bind("<Control-t>"))
+        self.assertTrue(self.root.bind("<Control-Shift-P>"))
         self.assertTrue(self.root.bind("<Control-Shift-O>"))
+
+    def test_status_is_placed_between_title_and_marker_toggle(self) -> None:
+        header = self.app.status_label.master
+        title_label = next(
+            widget
+            for widget in header.winfo_children()
+            if isinstance(widget, ttk.Label) and widget.cget("text") == "Markdown Quick Memo"
+        )
+        marker_toggle = next(
+            widget for widget in header.winfo_children() if isinstance(widget, ttk.Checkbutton)
+        )
+
+        self.assertEqual(int(title_label.grid_info()["column"]), 0)
+        self.assertEqual(int(self.app.status_label.grid_info()["column"]), 1)
+        self.assertEqual(int(marker_toggle.grid_info()["column"]), 2)
+        self.assertNotEqual(self.app.status_text.get(), "")
+
+    def test_pdf_export_saves_markdown_before_writing_pdf(self) -> None:
+        self.app._replace_text("# PDF")
+        with TemporaryDirectory() as directory:
+            markdown_path = Path(directory) / "memo.md"
+            self.app._save_to(markdown_path)
+            self.app.editor.insert("end", "\n更新")
+            self.app._on_modified()
+            pdf_path = markdown_path.with_suffix(".pdf")
+
+            with patch(
+                "markdown_quick_memo.pdf_exporter.export_markdown_to_pdf",
+                return_value=pdf_path,
+            ) as exporter:
+                result = self.app.export_pdf()
+
+            self.assertEqual(result, "break")
+            self.assertEqual(markdown_path.read_text(encoding="utf-8"), "# PDF\n更新")
+            exporter.assert_called_once_with("# PDF\n更新", markdown_path.resolve(), pdf_path.resolve())
+            self.assertIn("PDFを書き出しました", self.app.status_text.get())
 
     def test_window_transparency_can_be_toggled(self) -> None:
         self.assertFalse(self.app.transparent_mode.get())
@@ -113,7 +171,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertTrue(self.app.transparent_mode.get())
         self.assertAlmostEqual(float(self.root.attributes("-alpha")), 0.6)
-        self.assertIn("透過 60%", self.app.status_text.get())
+        self.assertNotIn("透過 60%", self.app.status_text.get())
 
         self.app.toggle_window_transparency()
 
@@ -141,6 +199,122 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertTrue(self.app.dirty)
 
+    def test_table_preview_draws_borders_and_forwards_mousewheel(self) -> None:
+        markdown = (
+            "| name | value |\n"
+            "| --- | --- |\n"
+            "| p | q |\n"
+            "| r | s |"
+        )
+        self.app._replace_text(markdown)
+        table_widget = self.app._create_table_widget(self.app._analysis.tables[0])
+        self.app._bind_editor_decoration_events(table_widget)
+        self.root.update_idletasks()
+
+        line_widgets = sorted(
+            (
+                child
+                for child in table_widget.winfo_children()
+                if isinstance(child, tk.Frame) and child.cget("background") == TABLE_LINE_COLOR
+            ),
+            key=lambda widget: int(widget.grid_info()["row"]),
+        )
+        self.assertEqual(
+            [int(widget.cget("height")) for widget in line_widgets],
+            [
+                TABLE_STRONG_LINE_WIDTH,
+                TABLE_STRONG_LINE_WIDTH,
+                TABLE_LINE_WIDTH,
+                TABLE_STRONG_LINE_WIDTH,
+            ],
+        )
+        self.assertTrue(
+            all(widget.bind("<MouseWheel>") for widget in (table_widget, *_descendants(table_widget)))
+        )
+
+        wheel_event = tk.Event()
+        wheel_event.delta = 120
+        with patch.object(self.app.editor, "yview_scroll") as scroll:
+            result = self.app._forward_editor_mousewheel(wheel_event)
+
+        scroll.assert_called_once_with(-1, "units")
+        self.assertEqual(result, "break")
+
+    def test_clicking_horizontal_rule_activates_its_markdown_line(self) -> None:
+        markdown = "先頭\n\n---\n\n末尾"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+        rule_widget = next(
+            widget
+            for widget in self.app._decoration_widgets
+            if isinstance(widget, tk.Frame) and int(widget.cget("height")) == 18
+        )
+
+        self.root.deiconify()
+        self.root.update()
+        rule_widget.event_generate("<Button-1>", x=2, y=2)
+        self.root.update()
+
+        self.assertEqual(self.app.editor.index("insert linestart"), "3.0")
+        self.assertNotIn(rule_widget, self.app._decoration_widgets)
+
+    def test_cursor_line_change_reuses_analysis_and_unaffected_decorations(self) -> None:
+        markdown = "---\n\n数式 $x^2$\n\n末尾"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+        rule_widget = next(
+            widget
+            for widget in self.app._decoration_widgets
+            if isinstance(widget, tk.Frame) and int(widget.cget("height")) == 18
+        )
+        math_widget = next(
+            widget
+            for widget in self.app._decoration_widgets
+            if isinstance(widget, tk.Label) and hasattr(widget, "image")
+        )
+
+        self.app.editor.mark_set("insert", "1.0")
+        with (
+            patch("markdown_quick_memo.app.analyze_markdown") as analyze,
+            patch.object(self.app, "_apply_script_fonts") as apply_script_fonts,
+        ):
+            self.app._on_cursor_moved()
+
+        analyze.assert_not_called()
+        apply_script_fonts.assert_not_called()
+        self.assertNotIn(rule_widget, self.app._decoration_widgets)
+        self.assertIn(math_widget, self.app._decoration_widgets)
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_cursor_line_change_updates_marker_visibility_on_affected_lines(self) -> None:
+        markdown = "**先頭**\n\n**末尾**"
+        self.app._replace_text(markdown)
+        self.assertNotIn("marker_hidden", self.app.editor.tag_names("1.0"))
+
+        self.app.editor.mark_set("insert", "3.2")
+        self.app._on_cursor_moved()
+
+        self.assertIn("marker_hidden", self.app.editor.tag_names("1.0"))
+        self.assertNotIn("marker_hidden", self.app.editor.tag_names("3.0"))
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_search_widgets_and_script_fonts_are_initialized_lazily(self) -> None:
+        self.assertIsNone(self.app.search_entry)
+        self.assertFalse(self.app._script_font_tags_ready)
+
+        self.app.show_search()
+
+        self.assertIsNotNone(self.app.search_entry)
+        self.assertTrue(self.app._search_visible)
+        self.app.hide_search()
+
+        self.app._replace_text("English 日本語")
+
+        self.assertTrue(self.app._script_font_tags_ready)
+        self.assertIn("script_font_latin_body", self.app.editor.tag_names("1.0"))
+
     def test_editor_uses_language_specific_fonts(self) -> None:
         markdown = "# English 日本語\n\n**Bold 太字**"
         self.app._replace_text(markdown)
@@ -160,7 +334,7 @@ class GuiSmokeTests(unittest.TestCase):
         japanese_font_name = self.app.editor.tag_cget("script_font_japanese_heading1", "font")
         latin_font = tkfont.Font(root=self.root, font=latin_font_name)
         japanese_font = tkfont.Font(root=self.root, font=japanese_font_name)
-        self.assertEqual(latin_font.actual("family"), "Roboto")
+        self.assertEqual(latin_font.actual("family"), "Segoe UI")
         self.assertTrue(str(japanese_font.actual("family")).startswith("BIZ UD"))
 
     def test_heading_math_uses_heading_size(self) -> None:

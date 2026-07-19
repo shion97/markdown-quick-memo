@@ -14,7 +14,7 @@ import sys
 from .markdown_styler import StyleSpan
 
 
-LATIN_FONT_FAMILY = "Roboto"
+LATIN_FONT_FAMILY = "Segoe UI"
 JAPANESE_FONT_FAMILY = "BIZ UDGothic"
 MONOSPACE_FONT_FAMILY = "Cascadia Mono"
 MATH_SOURCE_FONT_FAMILY = "Cambria Math"

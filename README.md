@@ -1,6 +1,6 @@
 # Markdown Quick Memo
 
-Windows向けの、小型でキーボード中心のMarkdownメモアプリです。Markdownの元データを保持したまま編集欄へ装飾を反映し、カーソル行以外のMarkdown記号を可能な範囲で隠します。
+Windows向けの、小型でキーボード中心のMarkdownメモアプリです。Markdownの元データを保持したまま編集欄へ装飾を反映し、カーソル行以外のMarkdown記号を可能な範囲で隠します。保存したMarkdownは、任意のタイミングで同じフォルダへPDFとして書き出せます。
 
 ## セットアップと起動
 
@@ -33,6 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
 | 開く | `Ctrl + O` |
 | 保存 | `Ctrl + S` |
 | 名前を付けて保存 | `Ctrl + Shift + S` |
+| PDFに書き出す | `Ctrl + Shift + P` |
 | 閉じる | `Ctrl + Q` / `Alt + F4` |
 | 元に戻す / やり直す | `Ctrl + Z` / `Ctrl + Y` |
 | 検索 | `Ctrl + F` |
@@ -42,6 +43,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
 | リンク・画像を開く | 対象を `Ctrl + クリック` |
 
 ローカル画像は画像記法を `Ctrl + クリック` するとプレビューします。相対パスは、保存済みメモではメモの保存フォルダ、未保存メモではアプリの作業フォルダを基準に解決します。
+
+PDF書き出しは「ファイル」メニューまたは `Ctrl + Shift + P` から実行します。未保存または変更中のメモは先にMarkdownとして保存し、`memo.md` と同じフォルダへ `memo.pdf` を生成します。同名PDFがある場合は上書きを確認します。ローカル画像はMarkdownファイルのフォルダを基準に埋め込み、外部画像URLは取得しません。
 
 半透明表示はウィンドウ全体を60%の不透明度にし、背後の資料を確認しやすくします。アプリを再起動すると不透明表示へ戻ります。
 
@@ -61,13 +64,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 
 ## 実装上の方針
 
-- 本文は日本語をBIZ UDGothic、英数字を同梱したRobotoで表示します。コードは等幅フォント、数式プレビューはComputer Modernを使用します。
+- 本文は日本語をBIZ UDGothic、英数字をSegoe UIで表示します。PDFではSegoe UIを利用できない場合に同梱Robotoへフォールバックします。コードは等幅フォント、数式プレビューはComputer Modernを使用します。
 - 編集欄内の文字列が保存されるMarkdownそのものです。
 - 記号を隠していても、カーソルがある行では編集できるよう記号を表示します。
 - リストの点・番号と引用の灰色マーカーは、記号を隠す設定でも表示します。
 - コードフェンスを隠したときも、指定した言語名をコードブロック上部へ残します。
 - 水平線は編集欄の幅に合わせて描画し、表は縦線と外周線を使わず行間の横線だけで描画します。
 - `Ctrl + T` では行数と列数を指定し、各セルを `q` で埋めたMarkdown表を選択範囲またはカーソル位置へ挿入します。
+- `Ctrl + Shift + P` では、現在のMarkdownを正本として同一フォルダへ同名PDFを書き出します。PDF生成用ライブラリは操作時だけ読み込み、通常起動へ影響させません。
 - 水平線または表へカーソルを移すと、編集できるMarkdown原文へ自動的に戻ります。
 - インライン数式は `$E=mc^2$`、独立した数式は `$$\\frac{a}{b}$$` の形式で入力できます。カーソル行以外ではLaTeX数式をMathText画像として表示し、見出し内では見出しサイズへ連動します。
 - MathTextはウィンドウ表示後にバックグラウンドで先読みし、生成した数式画像をキャッシュして初回変換と再描画の待ち時間を抑えます。
@@ -87,4 +91,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 
 ## 同梱フォント
 
-RobotoはSIL Open Font License 1.1に基づいて同梱し、アプリのプロセス内だけで登録します。ライセンス全文は `assets/fonts/OFL-Roboto.txt` にあります。
+PDF出力時のフォールバック用RobotoはSIL Open Font License 1.1に基づいて同梱し、アプリのプロセス内だけで登録します。ライセンス全文は `assets/fonts/OFL-Roboto.txt` にあります。
