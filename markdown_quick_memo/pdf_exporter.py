@@ -26,7 +26,6 @@ PDF_CODE_LANGUAGE_FONT_SIZE = 9
 PDF_TABLE_FONT_SIZE = 10
 PDF_LIST_BULLET_FONT_SIZE = 4.5
 PDF_LIST_NUMBER_FONT_SIZE = 10
-PDF_LIST_BULLET_OFFSET_Y = PDF_LIST_BULLET_FONT_SIZE - PDF_BODY_FONT_SIZE
 PDF_LIST_NUMBER_OFFSET_Y = PDF_LIST_NUMBER_FONT_SIZE - PDF_BODY_FONT_SIZE
 PDF_TABLE_LINE_WIDTH = 0.8
 PDF_TABLE_STRONG_LINE_WIDTH = PDF_TABLE_LINE_WIDTH * 2
@@ -312,6 +311,27 @@ def _register_pdf_fonts(temporary_directory: Path) -> _PdfFonts:
         japanese,
         japanese_bold,
         monospace,
+    )
+
+
+def _centered_list_bullet_offset_y(body_font_name: str, bullet_font_name: str) -> float:
+    from reportlab.pdfbase import pdfmetrics
+
+    body_ascent, body_descent = pdfmetrics.getAscentDescent(
+        body_font_name,
+        PDF_BODY_FONT_SIZE,
+    )
+    bullet_ascent, bullet_descent = pdfmetrics.getAscentDescent(
+        bullet_font_name,
+        PDF_LIST_BULLET_FONT_SIZE,
+    )
+    body_center = (body_ascent + body_descent) / 2
+    bullet_center = (bullet_ascent + bullet_descent) / 2
+    return (
+        PDF_LIST_BULLET_FONT_SIZE
+        - PDF_BODY_FONT_SIZE
+        + body_center
+        - bullet_center
     )
 
 
@@ -1044,6 +1064,12 @@ class _PdfFlowableRenderer:
         scheme = urlparse(target).scheme.lower()
         return scheme in {"", "http", "https", "mailto"}
 
+    def _list_bullet_offset_y(self) -> float:
+        return _centered_list_bullet_offset_y(
+            self.fonts.japanese,
+            self.fonts.japanese_bold,
+        )
+
     def _list_flowable(self, node: _HtmlNode, *, depth: int, quote_depth: int):
         from reportlab.platypus import ListFlowable, ListItem
 
@@ -1096,7 +1122,7 @@ class _PdfFlowableRenderer:
                 PDF_LIST_NUMBER_FONT_SIZE if ordered else PDF_LIST_BULLET_FONT_SIZE
             ),
             bulletOffsetY=(
-                PDF_LIST_NUMBER_OFFSET_Y if ordered else PDF_LIST_BULLET_OFFSET_Y
+                PDF_LIST_NUMBER_OFFSET_Y if ordered else self._list_bullet_offset_y()
             ),
             bulletFormat="%s." if ordered else None,
             spaceAfter=4,
@@ -1179,7 +1205,7 @@ class _PdfFlowableRenderer:
                         PDF_LIST_NUMBER_FONT_SIZE if ordered else PDF_LIST_BULLET_FONT_SIZE
                     ),
                     bulletOffsetY=(
-                        PDF_LIST_NUMBER_OFFSET_Y if ordered else PDF_LIST_BULLET_OFFSET_Y
+                        PDF_LIST_NUMBER_OFFSET_Y if ordered else self._list_bullet_offset_y()
                     ),
                     bulletFormat=f"%s{suffix}" if ordered else None,
                     spaceAfter=4,

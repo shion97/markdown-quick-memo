@@ -6,14 +6,15 @@ import unittest
 from PIL import Image
 
 from markdown_quick_memo.pdf_exporter import (
+    PDF_BODY_FONT_SIZE,
     PDF_INLINE_MATH_DPI,
     PDF_LIST_BULLET_FONT_SIZE,
-    PDF_LIST_BULLET_OFFSET_Y,
     PDF_LIST_NUMBER_OFFSET_Y,
     PDF_TABLE_LINE_WIDTH,
     PDF_TABLE_STRONG_LINE_WIDTH,
     _PdfFlowableRenderer,
     _PdfFonts,
+    _centered_list_bullet_offset_y,
     _prepare_list_assets,
     _prepare_math_assets,
     _markdown_to_html,
@@ -182,9 +183,32 @@ class PdfExporterTests(unittest.TestCase):
             ],
         )
 
-    def test_pdf_list_markers_are_smaller_and_lowered_to_the_text_baseline(self) -> None:
+    def test_pdf_list_bullets_are_centered_on_the_text_line(self) -> None:
+        from reportlab.pdfbase import pdfmetrics
+
+        body_font_name = "Helvetica"
+        bullet_font_name = "Helvetica-Bold"
+        bullet_offset_y = _centered_list_bullet_offset_y(
+            body_font_name,
+            bullet_font_name,
+        )
+        body_ascent, body_descent = pdfmetrics.getAscentDescent(
+            body_font_name,
+            PDF_BODY_FONT_SIZE,
+        )
+        bullet_ascent, bullet_descent = pdfmetrics.getAscentDescent(
+            bullet_font_name,
+            PDF_LIST_BULLET_FONT_SIZE,
+        )
+        body_center = -PDF_BODY_FONT_SIZE + (body_ascent + body_descent) / 2
+        bullet_center = (
+            -PDF_LIST_BULLET_FONT_SIZE
+            + bullet_offset_y
+            + (bullet_ascent + bullet_descent) / 2
+        )
+
         self.assertEqual(PDF_LIST_BULLET_FONT_SIZE, 4.5)
-        self.assertLess(PDF_LIST_BULLET_OFFSET_Y, 0)
+        self.assertAlmostEqual(bullet_center, body_center)
         self.assertLess(PDF_LIST_NUMBER_OFFSET_Y, 0)
 
     def test_pdf_feature_corpus_is_exported(self) -> None:
