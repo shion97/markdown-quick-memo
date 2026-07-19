@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -5,6 +6,7 @@ import unittest
 from PIL import Image
 
 from markdown_quick_memo.pdf_exporter import (
+    PDF_INLINE_MATH_DPI,
     PDF_LIST_BULLET_FONT_SIZE,
     PDF_LIST_BULLET_OFFSET_Y,
     PDF_LIST_NUMBER_OFFSET_Y,
@@ -18,9 +20,40 @@ from markdown_quick_memo.pdf_exporter import (
     _parse_html,
     export_markdown_to_pdf,
 )
+from markdown_quick_memo.math_renderer import render_math_png
 
 
 class PdfExporterTests(unittest.TestCase):
+    def test_inline_math_uses_high_resolution_without_changing_pdf_size(self) -> None:
+        expression = r"E=mc^2"
+        legacy_dpi = 120
+
+        with TemporaryDirectory() as directory:
+            _prepared_markdown, math_assets = _prepare_math_assets(
+                f"本文 ${expression}$",
+                Path(directory),
+            )
+            asset = next(iter(math_assets.values()))
+            self.assertIsNotNone(asset.path)
+            assert asset.path is not None
+
+            with Image.open(asset.path) as high_resolution_image:
+                high_resolution_width = high_resolution_image.width
+                high_resolution_height = high_resolution_image.height
+            with Image.open(
+                BytesIO(render_math_png(expression, font_size=asset.font_size, dpi=legacy_dpi))
+            ) as legacy_resolution_image:
+                legacy_resolution_width = legacy_resolution_image.width
+                legacy_resolution_height = legacy_resolution_image.height
+                legacy_width_points = legacy_resolution_image.width * 72.0 / legacy_dpi
+                legacy_height_points = legacy_resolution_image.height * 72.0 / legacy_dpi
+
+        self.assertEqual(PDF_INLINE_MATH_DPI, 300)
+        self.assertGreater(high_resolution_width, legacy_resolution_width * 2)
+        self.assertGreater(high_resolution_height, legacy_resolution_height * 2)
+        self.assertAlmostEqual(asset.width, legacy_width_points, delta=1.0)
+        self.assertAlmostEqual(asset.height, legacy_height_points, delta=1.0)
+
     def test_pdf_feature_corpus_prepares_every_math_and_exact_list_labels(self) -> None:
         fixture_path = Path(__file__).parent / "fixtures" / "pdf_all_features.md"
         markdown = fixture_path.read_text(encoding="utf-8")

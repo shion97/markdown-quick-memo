@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from markdown_quick_memo.app import (
+    EDITOR_SCROLL_PIXELS_PER_NOTCH,
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
@@ -234,11 +235,36 @@ class GuiSmokeTests(unittest.TestCase):
 
         wheel_event = tk.Event()
         wheel_event.delta = 120
-        with patch.object(self.app.editor, "yview_scroll") as scroll:
+        with (
+            patch.object(self.app.editor, "yview", return_value=(0.2, 0.6)),
+            patch.object(self.app.editor, "winfo_height", return_value=400),
+            patch.object(self.app.editor, "yview_moveto") as scroll,
+        ):
             result = self.app._forward_editor_mousewheel(wheel_event)
 
-        scroll.assert_called_once_with(-1, "units")
+        expected_fraction = 0.2 - EDITOR_SCROLL_PIXELS_PER_NOTCH * (0.6 - 0.2) / 400
+        scroll.assert_called_once()
+        self.assertAlmostEqual(scroll.call_args.args[0], expected_fraction)
         self.assertEqual(result, "break")
+
+    def test_scroll_redraw_is_coalesced_until_idle(self) -> None:
+        self.app._scroll_redraw_job = None
+
+        with (
+            patch.object(self.app._editor_scrollbar, "set") as update_scrollbar,
+            patch.object(self.root, "after_idle", return_value="scroll-redraw") as after_idle,
+        ):
+            self.app._on_editor_yview_changed("0.1", "0.5")
+            self.app._on_editor_yview_changed("0.2", "0.6")
+
+        self.assertEqual(update_scrollbar.call_count, 2)
+        after_idle.assert_called_once_with(self.app._flush_editor_scroll_redraw)
+
+        with patch.object(self.app.editor, "update_idletasks") as update_idletasks:
+            self.app._flush_editor_scroll_redraw()
+
+        update_idletasks.assert_called_once_with()
+        self.assertIsNone(self.app._scroll_redraw_job)
 
     def test_clicking_horizontal_rule_activates_its_markdown_line(self) -> None:
         markdown = "先頭\n\n---\n\n末尾"
