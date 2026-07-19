@@ -35,6 +35,8 @@ from .math_renderer import preload_math_renderer, render_math_png
 APP_NAME = "Markdown Quick Memo"
 DEFAULT_GEOMETRY = "760x620"
 RENDER_DELAY_MS = 140
+EDITOR_SCROLL_PIXELS_PER_NOTCH = 48
+WINDOWS_MOUSE_WHEEL_DELTA = 120
 LIST_BULLET_FONT_SIZE = 9
 LIST_HOLLOW_BULLET_FONT_SIZE = 6
 LIST_NUMBER_FONT_SIZE = 10
@@ -44,7 +46,8 @@ TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 INLINE_MATH_FONT_SIZE = 8
 DISPLAY_MATH_FONT_SIZE = 15
-INLINE_MATH_DPI = 120
+INLINE_MATH_DISPLAY_DPI = 120
+INLINE_MATH_RENDER_DPI = 240
 DISPLAY_MATH_DPI = 150
 INLINE_MATH_TOP_PADDING = 4
 DISPLAY_MATH_VERTICAL_PADDING_POINTS = 2.0
@@ -91,6 +94,7 @@ class MarkdownQuickMemoApp:
         self.hide_markers = tk.BooleanVar(value=True)
         self.transparent_mode = tk.BooleanVar(value=False)
         self._render_job: str | None = None
+        self._scroll_redraw_job: str | None = None
         self._last_cursor_line = 1
         self._analysis = MarkdownAnalysis()
         self._analysis_stale = False
@@ -145,7 +149,7 @@ class MarkdownQuickMemoApp:
         if self._math_preload_thread is not None and self._math_preload_thread.is_alive():
             return
         requests = (
-            ("E=mc^2", INLINE_MATH_FONT_SIZE, INLINE_MATH_DPI, 0.0),
+            ("E=mc^2", INLINE_MATH_FONT_SIZE, INLINE_MATH_RENDER_DPI, 0.0),
             (
                 r"\frac{a}{b}",
                 DISPLAY_MATH_FONT_SIZE,
@@ -225,7 +229,8 @@ class MarkdownQuickMemoApp:
             spacing3=2,
         )
         scrollbar = ttk.Scrollbar(editor_frame, orient="vertical", command=self.editor.yview)
-        self.editor.configure(yscrollcommand=scrollbar.set)
+        self._editor_scrollbar = scrollbar
+        self.editor.configure(yscrollcommand=self._on_editor_yview_changed)
         self.editor.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
 
@@ -461,6 +466,7 @@ class MarkdownQuickMemoApp:
         self.editor.bind("<ButtonRelease-1>", self._on_cursor_moved, add=True)
         self.editor.bind("<Control-Button-1>", self._on_control_click, add=True)
         self.editor.bind("<Configure>", self._on_editor_resized, add=True)
+        self.editor.bind("<MouseWheel>", self._forward_editor_mousewheel)
 
     @staticmethod
     def _break() -> str:
@@ -878,7 +884,7 @@ class MarkdownQuickMemoApp:
         try:
             from PIL import Image, ImageTk
 
-            render_dpi = DISPLAY_MATH_DPI if expression.display else INLINE_MATH_DPI
+            render_dpi = DISPLAY_MATH_DPI if expression.display else INLINE_MATH_RENDER_DPI
             image_bytes = render_math_png(
                 source_expression,
                 font_size,
@@ -890,6 +896,12 @@ class MarkdownQuickMemoApp:
             )
             rendered_image = Image.open(BytesIO(image_bytes)).convert("RGBA")
             if not expression.display:
+                display_scale = INLINE_MATH_DISPLAY_DPI / INLINE_MATH_RENDER_DPI
+                display_size = (
+                    max(1, round(rendered_image.width * display_scale)),
+                    max(1, round(rendered_image.height * display_scale)),
+                )
+                rendered_image = rendered_image.resize(display_size, Image.Resampling.LANCZOS)
                 vertically_centered_image = Image.new(
                     "RGBA",
                     (rendered_image.width, rendered_image.height + INLINE_MATH_TOP_PADDING),
@@ -1106,9 +1118,28 @@ class MarkdownQuickMemoApp:
         if delta == 0:
             return None
         direction = -1 if delta > 0 else 1
-        scroll_units = max(1, abs(delta) // 120)
-        self.editor.yview_scroll(direction * scroll_units, "units")
+        scroll_pixels = max(
+            1,
+            round(abs(delta) / WINDOWS_MOUSE_WHEEL_DELTA * EDITOR_SCROLL_PIXELS_PER_NOTCH),
+        )
+        first, last = self.editor.yview()
+        visible_fraction = max(0.0, last - first)
+        viewport_height = max(1, self.editor.winfo_height())
+        fraction_delta = direction * scroll_pixels * visible_fraction / viewport_height
+        maximum_first = max(0.0, 1.0 - visible_fraction)
+        self.editor.yview_moveto(min(max(first + fraction_delta, 0.0), maximum_first))
         return "break"
+
+    def _on_editor_yview_changed(self, first: str, last: str) -> None:
+        self._editor_scrollbar.set(first, last)
+        if self._scroll_redraw_job is None:
+            self._scroll_redraw_job = self.root.after_idle(self._flush_editor_scroll_redraw)
+
+    def _flush_editor_scroll_redraw(self) -> None:
+        try:
+            self.editor.update_idletasks()
+        finally:
+            self._scroll_redraw_job = None
 
     def _highlight_current_line(self) -> None:
         self.editor.tag_remove("current_line", "1.0", "end")
@@ -1251,6 +1282,7 @@ class MarkdownQuickMemoApp:
     def _cancel_scheduled_jobs(self) -> None:
         for attribute in (
             "_render_job",
+            "_scroll_redraw_job",
             "_resize_job",
             "_math_preload_job",
             "_script_font_tag_job",
