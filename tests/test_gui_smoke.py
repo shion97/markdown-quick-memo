@@ -11,6 +11,10 @@ from markdown_quick_memo.app import (
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
+    INLINE_MATH_DISPLAY_DPI,
+    INLINE_MATH_FONT_SIZE,
+    INLINE_MATH_RENDER_DPI,
+    INLINE_MATH_TOP_PADDING,
     MarkdownQuickMemoApp,
     TABLE_LINE_COLOR,
     TABLE_LINE_WIDTH,
@@ -418,6 +422,53 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertFalse(hasattr(widget, "image"))
         self.assertEqual(widget.cget("text"), rf"${expression.expression}$")
+
+    def test_inline_math_is_supersampled_without_changing_display_size(self) -> None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        expression = MathExpression(0, 0, r"E=mc^2", False)
+        widget = self.app._create_math_widget(expression)
+        with Image.open(
+            BytesIO(
+                render_math_png(
+                    expression.expression,
+                    font_size=INLINE_MATH_FONT_SIZE,
+                    dpi=INLINE_MATH_RENDER_DPI,
+                )
+            )
+        ) as high_resolution_image:
+            expected_width = round(
+                high_resolution_image.width * INLINE_MATH_DISPLAY_DPI / INLINE_MATH_RENDER_DPI
+            )
+            expected_height = round(
+                high_resolution_image.height * INLINE_MATH_DISPLAY_DPI / INLINE_MATH_RENDER_DPI
+            )
+        with Image.open(
+            BytesIO(
+                render_math_png(
+                    expression.expression,
+                    font_size=INLINE_MATH_FONT_SIZE,
+                    dpi=INLINE_MATH_DISPLAY_DPI,
+                )
+            )
+        ) as legacy_resolution_image:
+            legacy_width = legacy_resolution_image.width
+            legacy_height = legacy_resolution_image.height
+
+        self.assertEqual(INLINE_MATH_RENDER_DPI, INLINE_MATH_DISPLAY_DPI * 2)
+        self.assertEqual(widget.image.width(), expected_width)  # type: ignore[attr-defined]
+        self.assertEqual(  # type: ignore[attr-defined]
+            widget.image.height(),
+            expected_height + INLINE_MATH_TOP_PADDING,
+        )
+        self.assertAlmostEqual(widget.image.width(), legacy_width, delta=1)  # type: ignore[attr-defined]
+        self.assertAlmostEqual(  # type: ignore[attr-defined]
+            widget.image.height() - INLINE_MATH_TOP_PADDING,
+            legacy_height,
+            delta=1,
+        )
 
     def test_math_renderer_can_be_preloaded_in_background(self) -> None:
         self.app._start_math_preload()

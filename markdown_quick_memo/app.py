@@ -46,7 +46,8 @@ TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 INLINE_MATH_FONT_SIZE = 8
 DISPLAY_MATH_FONT_SIZE = 15
-INLINE_MATH_DPI = 120
+INLINE_MATH_DISPLAY_DPI = 120
+INLINE_MATH_RENDER_DPI = 240
 DISPLAY_MATH_DPI = 150
 INLINE_MATH_TOP_PADDING = 4
 DISPLAY_MATH_VERTICAL_PADDING_POINTS = 2.0
@@ -148,7 +149,7 @@ class MarkdownQuickMemoApp:
         if self._math_preload_thread is not None and self._math_preload_thread.is_alive():
             return
         requests = (
-            ("E=mc^2", INLINE_MATH_FONT_SIZE, INLINE_MATH_DPI, 0.0),
+            ("E=mc^2", INLINE_MATH_FONT_SIZE, INLINE_MATH_RENDER_DPI, 0.0),
             (
                 r"\frac{a}{b}",
                 DISPLAY_MATH_FONT_SIZE,
@@ -883,7 +884,7 @@ class MarkdownQuickMemoApp:
         try:
             from PIL import Image, ImageTk
 
-            render_dpi = DISPLAY_MATH_DPI if expression.display else INLINE_MATH_DPI
+            render_dpi = DISPLAY_MATH_DPI if expression.display else INLINE_MATH_RENDER_DPI
             image_bytes = render_math_png(
                 source_expression,
                 font_size,
@@ -895,6 +896,12 @@ class MarkdownQuickMemoApp:
             )
             rendered_image = Image.open(BytesIO(image_bytes)).convert("RGBA")
             if not expression.display:
+                display_scale = INLINE_MATH_DISPLAY_DPI / INLINE_MATH_RENDER_DPI
+                display_size = (
+                    max(1, round(rendered_image.width * display_scale)),
+                    max(1, round(rendered_image.height * display_scale)),
+                )
+                rendered_image = rendered_image.resize(display_size, Image.Resampling.LANCZOS)
                 vertically_centered_image = Image.new(
                     "RGBA",
                     (rendered_image.width, rendered_image.height + INLINE_MATH_TOP_PADDING),
