@@ -171,7 +171,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertTrue(self.app.transparent_mode.get())
         self.assertAlmostEqual(float(self.root.attributes("-alpha")), 0.6)
-        self.assertIn("透過 60%", self.app.status_text.get())
+        self.assertNotIn("透過 60%", self.app.status_text.get())
 
         self.app.toggle_window_transparency()
 
@@ -258,6 +258,62 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertEqual(self.app.editor.index("insert linestart"), "3.0")
         self.assertNotIn(rule_widget, self.app._decoration_widgets)
+
+    def test_cursor_line_change_reuses_analysis_and_unaffected_decorations(self) -> None:
+        markdown = "---\n\n数式 $x^2$\n\n末尾"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+        rule_widget = next(
+            widget
+            for widget in self.app._decoration_widgets
+            if isinstance(widget, tk.Frame) and int(widget.cget("height")) == 18
+        )
+        math_widget = next(
+            widget
+            for widget in self.app._decoration_widgets
+            if isinstance(widget, tk.Label) and hasattr(widget, "image")
+        )
+
+        self.app.editor.mark_set("insert", "1.0")
+        with (
+            patch("markdown_quick_memo.app.analyze_markdown") as analyze,
+            patch.object(self.app, "_apply_script_fonts") as apply_script_fonts,
+        ):
+            self.app._on_cursor_moved()
+
+        analyze.assert_not_called()
+        apply_script_fonts.assert_not_called()
+        self.assertNotIn(rule_widget, self.app._decoration_widgets)
+        self.assertIn(math_widget, self.app._decoration_widgets)
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_cursor_line_change_updates_marker_visibility_on_affected_lines(self) -> None:
+        markdown = "**先頭**\n\n**末尾**"
+        self.app._replace_text(markdown)
+        self.assertNotIn("marker_hidden", self.app.editor.tag_names("1.0"))
+
+        self.app.editor.mark_set("insert", "3.2")
+        self.app._on_cursor_moved()
+
+        self.assertIn("marker_hidden", self.app.editor.tag_names("1.0"))
+        self.assertNotIn("marker_hidden", self.app.editor.tag_names("3.0"))
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_search_widgets_and_script_fonts_are_initialized_lazily(self) -> None:
+        self.assertIsNone(self.app.search_entry)
+        self.assertFalse(self.app._script_font_tags_ready)
+
+        self.app.show_search()
+
+        self.assertIsNotNone(self.app.search_entry)
+        self.assertTrue(self.app._search_visible)
+        self.app.hide_search()
+
+        self.app._replace_text("English 日本語")
+
+        self.assertTrue(self.app._script_font_tags_ready)
+        self.assertIn("script_font_latin_body", self.app.editor.tag_names("1.0"))
 
     def test_editor_uses_language_specific_fonts(self) -> None:
         markdown = "# English 日本語\n\n**Bold 太字**"

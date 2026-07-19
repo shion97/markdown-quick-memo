@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 import os
 from pathlib import Path
@@ -48,6 +49,7 @@ DISPLAY_MATH_DPI = 150
 INLINE_MATH_TOP_PADDING = 4
 DISPLAY_MATH_VERTICAL_PADDING_POINTS = 2.0
 MATH_PRELOAD_DELAY_MS = 100
+SCRIPT_FONT_TAG_DELAY_MS = 25
 MAX_TABLE_DIMENSION = 100
 OPAQUE_WINDOW_ALPHA = 1.0
 TRANSLUCENT_WINDOW_ALPHA = 0.6
@@ -66,6 +68,17 @@ def build_table_template(row_count: int, column_count: int) -> str:
     return "\n".join([value_row, delimiter_row, *([value_row] * (row_count - 1))])
 
 
+@dataclass(slots=True)
+class _DecorationRecord:
+    start: int
+    end: int
+    decoration_type: str
+    decoration: object
+    start_mark: str
+    end_mark: str
+    widget: tk.Widget | None = None
+
+
 class MarkdownQuickMemoApp:
     def __init__(self, root: tk.Tk, initial_path: Path | None = None) -> None:
         self.root = root
@@ -80,14 +93,24 @@ class MarkdownQuickMemoApp:
         self._render_job: str | None = None
         self._last_cursor_line = 1
         self._analysis = MarkdownAnalysis()
+        self._analysis_stale = False
         self._dynamic_link_tags: list[str] = []
         self._decoration_widgets: list[tk.Widget] = []
+        self._decoration_records: list[_DecorationRecord] = []
         self._rendering = False
         self._last_editor_width = 0
         self._resize_job: str | None = None
         self._search_visible = False
+        self._main_frame: ttk.Frame | None = None
+        self.search_frame: ttk.Frame | None = None
+        self.search_entry: ttk.Entry | None = None
         self._math_preload_job: str | None = None
         self._math_preload_thread: Thread | None = None
+        self._script_font_tag_job: str | None = None
+        self._script_font_tags_ready = False
+        self._character_count = 0
+        self._word_count = 0
+        self._document_statistics_dirty = True
 
         self._configure_named_fonts()
         self._configure_window()
@@ -99,7 +122,20 @@ class MarkdownQuickMemoApp:
         if initial_path is not None:
             self.open_path(initial_path)
         self.editor.focus_set()
+        self._schedule_script_font_tag_configuration()
         self._schedule_math_preload()
+
+    def _schedule_script_font_tag_configuration(self) -> None:
+        if self._script_font_tags_ready or self._script_font_tag_job is not None:
+            return
+        self._script_font_tag_job = self.root.after(
+            SCRIPT_FONT_TAG_DELAY_MS,
+            self._configure_scheduled_script_font_tags,
+        )
+
+    def _configure_scheduled_script_font_tags(self) -> None:
+        self._script_font_tag_job = None
+        self._ensure_script_font_tags()
 
     def _schedule_math_preload(self) -> None:
         self._math_preload_job = self.root.after(MATH_PRELOAD_DELAY_MS, self._start_math_preload)
@@ -154,6 +190,7 @@ class MarkdownQuickMemoApp:
         main.grid(row=0, column=0, sticky="nsew")
         main.rowconfigure(1, weight=1)
         main.columnconfigure(0, weight=1)
+        self._main_frame = main
 
         header = ttk.Frame(main)
         header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
@@ -192,18 +229,43 @@ class MarkdownQuickMemoApp:
         self.editor.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
 
-        self.search_frame = ttk.Frame(main, padding=(0, 6, 0, 0))
-        self.search_frame.columnconfigure(1, weight=1)
-        ttk.Label(self.search_frame, text="検索").grid(row=0, column=0, padx=(0, 6))
-        self.search_entry = ttk.Entry(self.search_frame)
-        self.search_entry.grid(row=0, column=1, sticky="ew")
-        ttk.Button(self.search_frame, text="前へ", width=6, command=lambda: self.find_next(backwards=True)).grid(row=0, column=2, padx=(6, 2))
-        ttk.Button(self.search_frame, text="次へ", width=6, command=self.find_next).grid(row=0, column=3, padx=2)
-        ttk.Button(self.search_frame, text="閉じる", width=6, command=self.hide_search).grid(row=0, column=4, padx=(2, 0))
-
         self._build_menu()
         style = ttk.Style(self.root)
         style.configure("Title.TLabel", font=(self._latin_font_family, 11, "bold"))
+
+    def _ensure_search_widgets(self) -> tuple[ttk.Frame, ttk.Entry]:
+        if self.search_frame is not None and self.search_entry is not None:
+            return self.search_frame, self.search_entry
+        if self._main_frame is None:
+            raise RuntimeError("メイン画面が初期化されていません。")
+
+        search_frame = ttk.Frame(self._main_frame, padding=(0, 6, 0, 0))
+        search_frame.columnconfigure(1, weight=1)
+        ttk.Label(search_frame, text="検索").grid(row=0, column=0, padx=(0, 6))
+        search_entry = ttk.Entry(search_frame)
+        search_entry.grid(row=0, column=1, sticky="ew")
+        ttk.Button(
+            search_frame,
+            text="前へ",
+            width=6,
+            command=lambda: self.find_next(backwards=True),
+        ).grid(row=0, column=2, padx=(6, 2))
+        ttk.Button(search_frame, text="次へ", width=6, command=self.find_next).grid(
+            row=0,
+            column=3,
+            padx=2,
+        )
+        ttk.Button(search_frame, text="閉じる", width=6, command=self.hide_search).grid(
+            row=0,
+            column=4,
+            padx=(2, 0),
+        )
+        search_entry.bind("<KeyRelease>", lambda _event: self.highlight_search_matches())
+        search_entry.bind("<Return>", self.find_next)
+        search_entry.bind("<Shift-Return>", lambda _event: self.find_next(backwards=True))
+        self.search_frame = search_frame
+        self.search_entry = search_entry
+        return search_frame, search_entry
 
     def _build_menu(self) -> None:
         menu = tk.Menu(self.root)
@@ -306,7 +368,6 @@ class MarkdownQuickMemoApp:
         self.editor.tag_configure("current_line", background="#f8fafc")
         self.editor.tag_configure("search_match", background="#fde68a", foreground="#111827")
         self.editor.tag_configure("search_current", background="#fb923c", foreground="#111827")
-        self._configure_script_font_tags()
         self.editor.tag_lower("current_line")
 
     def _create_font(
@@ -357,7 +418,22 @@ class MarkdownQuickMemoApp:
             for font_style, font in font_specs.items():
                 self.editor.tag_configure(f"script_font_{script}_{font_style}", font=font)
 
+    def _ensure_script_font_tags(self) -> None:
+        if self._script_font_tags_ready:
+            return
+        if self._script_font_tag_job is not None:
+            try:
+                self.root.after_cancel(self._script_font_tag_job)
+            except tk.TclError:
+                pass
+            self._script_font_tag_job = None
+        self._configure_script_font_tags()
+        self._script_font_tags_ready = True
+
     def _apply_script_fonts(self, text: str) -> None:
+        if not text:
+            return
+        self._ensure_script_font_tags()
         for run in build_font_runs(text, self._analysis.spans):
             self.editor.tag_add(run.tag, f"1.0 + {run.start}c", f"1.0 + {run.end}c")
 
@@ -385,9 +461,6 @@ class MarkdownQuickMemoApp:
         self.editor.bind("<ButtonRelease-1>", self._on_cursor_moved, add=True)
         self.editor.bind("<Control-Button-1>", self._on_control_click, add=True)
         self.editor.bind("<Configure>", self._on_editor_resized, add=True)
-        self.search_entry.bind("<KeyRelease>", lambda event: self.highlight_search_matches())
-        self.search_entry.bind("<Return>", self.find_next)
-        self.search_entry.bind("<Shift-Return>", lambda event: self.find_next(backwards=True))
 
     @staticmethod
     def _break() -> str:
@@ -422,6 +495,8 @@ class MarkdownQuickMemoApp:
         if not self.editor.edit_modified():
             return
         self.dirty = True
+        self._analysis_stale = True
+        self._document_statistics_dirty = True
         self.editor.edit_modified(False)
         self._schedule_render()
         self._update_title_and_status()
@@ -429,8 +504,13 @@ class MarkdownQuickMemoApp:
     def _on_cursor_moved(self, _event: tk.Event | None = None) -> None:
         line = int(self.editor.index("insert").split(".")[0])
         if line != self._last_cursor_line:
+            previous_line = self._last_cursor_line
             self._last_cursor_line = line
-            self.render_markdown()
+            if self._analysis_stale:
+                self._highlight_current_line()
+                self._update_title_and_status()
+            else:
+                self._refresh_active_line(previous_line)
         else:
             self._highlight_current_line()
             self._update_title_and_status()
@@ -465,6 +545,8 @@ class MarkdownQuickMemoApp:
 
             text = self.editor.get("1.0", "end-1c")
             self._analysis = analyze_markdown(text)
+            self._analysis_stale = False
+            self._set_document_statistics(text)
             insert_index = f"1.0 + {insert_offset}c"
 
             for tag in self.editor.tag_names():
@@ -484,6 +566,8 @@ class MarkdownQuickMemoApp:
                 start = f"1.0 + {span.start}c"
                 end = f"1.0 + {span.end}c"
                 self.editor.tag_add(span.tag, start, end)
+                if span.concealable:
+                    self.editor.tag_add("marker_concealable", start, end)
                 if span.concealable and self.hide_markers.get():
                     if self.editor.compare(end, "<=", active_line_start) or self.editor.compare(start, ">=", active_line_end):
                         self.editor.tag_add("marker_hidden", start, end)
@@ -511,11 +595,72 @@ class MarkdownQuickMemoApp:
             )
             if yview:
                 self.editor.yview_moveto(yview[0])
+            self._last_cursor_line = int(self.editor.index("insert").split(".")[0])
             self._highlight_current_line()
             self._update_title_and_status()
             self.editor.edit_modified(False)
         finally:
             self._rendering = False
+
+    def _refresh_active_line(self, previous_line: int) -> None:
+        if self._rendering:
+            return
+        self._rendering = True
+        try:
+            yview = self.editor.yview()
+            insert_offset = len(self.editor.get("1.0", "insert"))
+            active_line_start_index = self.editor.index("insert linestart")
+            active_line_end_index = self.editor.index("insert lineend +1c")
+            active_line_start = len(self.editor.get("1.0", active_line_start_index))
+            active_line_end = len(self.editor.get("1.0", active_line_end_index))
+            self._sync_block_decorations(
+                insert_offset,
+                active_line_start,
+                active_line_end,
+            )
+            self._refresh_marker_visibility(
+                previous_line,
+                active_line_start_index,
+                active_line_end_index,
+            )
+            if yview:
+                self.editor.yview_moveto(yview[0])
+            self._highlight_current_line()
+            self._update_title_and_status()
+            self.editor.edit_modified(False)
+        finally:
+            self._rendering = False
+
+    def _refresh_marker_visibility(
+        self,
+        previous_line: int,
+        active_line_start: str,
+        active_line_end: str,
+    ) -> None:
+        if not self.hide_markers.get():
+            return
+        previous_line_start = f"{previous_line}.0"
+        previous_line_end = f"{previous_line}.0 lineend +1c"
+        self._set_marker_visibility(previous_line_start, previous_line_end, hidden=True)
+        self._set_marker_visibility(active_line_start, active_line_end, hidden=False)
+
+    def _set_marker_visibility(self, start_index: str, end_index: str, *, hidden: bool) -> None:
+        marker_range = self.editor.tag_nextrange(
+            "marker_concealable",
+            start_index,
+            end_index,
+        )
+        while marker_range:
+            start, end = marker_range
+            if hidden:
+                self.editor.tag_add("marker_hidden", start, end)
+            else:
+                self.editor.tag_remove("marker_hidden", start, end)
+            marker_range = self.editor.tag_nextrange(
+                "marker_concealable",
+                end,
+                end_index,
+            )
 
     def _selection_offsets(self) -> tuple[int, int] | None:
         selection = self._selection_indices()
@@ -527,7 +672,10 @@ class MarkdownQuickMemoApp:
         )
 
     def _clear_decorations(self) -> None:
-        for widget in self._decoration_widgets:
+        for record in sorted(self._decoration_records, key=lambda item: item.start, reverse=True):
+            widget = record.widget
+            if widget is None:
+                continue
             try:
                 window_index = self.editor.index(str(widget))
                 self.editor.delete(window_index)
@@ -537,7 +685,14 @@ class MarkdownQuickMemoApp:
                 widget.destroy()
             except tk.TclError:
                 pass
+            record.widget = None
+        for record in self._decoration_records:
+            try:
+                self.editor.mark_unset(record.start_mark, record.end_mark)
+            except tk.TclError:
+                pass
         self._decoration_widgets.clear()
+        self._decoration_records.clear()
 
     def _render_block_decorations(
         self,
@@ -547,22 +702,7 @@ class MarkdownQuickMemoApp:
     ) -> None:
         if not self.hide_markers.get():
             return
-        decorations: list[tuple[int, int, str, object]] = []
-        for rule in self._analysis.horizontal_rules:
-            if not rule.start <= insert_offset <= rule.end:
-                decorations.append((rule.start, rule.end, "rule", rule))
-        for table in self._analysis.tables:
-            if not table.start <= insert_offset < table.end:
-                decorations.append((table.start, table.end, "table", table))
-        for marker in self._analysis.list_markers:
-            if marker.end <= active_line_start or marker.start >= active_line_end:
-                decorations.append((marker.start, marker.end, "list_marker", marker))
-        for expression in self._analysis.math_expressions:
-            if any(table.start <= expression.start and expression.end <= table.end for table in self._analysis.tables):
-                continue
-            if expression.end <= active_line_start or expression.start >= active_line_end:
-                decorations.append((expression.start, expression.end, "math", expression))
-        prepared_decorations: list[tuple[int, str, object, str, str]] = []
+        decorations = self._collect_block_decorations()
         for number, (start, end, decoration_type, decoration) in enumerate(decorations):
             start_mark = f"_decoration_start_{number}"
             end_mark = f"_decoration_end_{number}"
@@ -570,26 +710,119 @@ class MarkdownQuickMemoApp:
             self.editor.mark_gravity(start_mark, "right")
             self.editor.mark_set(end_mark, f"1.0 + {end}c")
             self.editor.mark_gravity(end_mark, "left")
-            prepared_decorations.append((start, decoration_type, decoration, start_mark, end_mark))
+            self._decoration_records.append(
+                _DecorationRecord(
+                    start,
+                    end,
+                    decoration_type,
+                    decoration,
+                    start_mark,
+                    end_mark,
+                )
+            )
 
-        for _offset, decoration_type, decoration, start_mark, _end_mark in sorted(
-            prepared_decorations, reverse=True, key=lambda item: item[0]
-        ):
-            if decoration_type == "rule":
-                widget = self._create_horizontal_rule_widget()
-            elif decoration_type == "table":
-                widget = self._create_table_widget(decoration)  # type: ignore[arg-type]
-            elif decoration_type == "list_marker":
-                widget = self._create_list_marker_widget(decoration)  # type: ignore[arg-type]
-            else:
-                widget = self._create_math_widget(decoration)  # type: ignore[arg-type]
-            self.editor.window_create(start_mark, window=widget, align="center")
-            self._bind_editor_decoration_events(widget)
-            self._decoration_widgets.append(widget)
+        for record in sorted(self._decoration_records, key=lambda item: item.start, reverse=True):
+            if self._should_mount_decoration(
+                record,
+                insert_offset,
+                active_line_start,
+                active_line_end,
+            ):
+                self._mount_decoration(record)
 
-        for _offset, _decoration_type, _decoration, start_mark, end_mark in prepared_decorations:
-            self.editor.tag_add("marker_hidden", start_mark, end_mark)
-            self.editor.mark_unset(start_mark, end_mark)
+    def _collect_block_decorations(self) -> list[tuple[int, int, str, object]]:
+        decorations: list[tuple[int, int, str, object]] = []
+        for rule in self._analysis.horizontal_rules:
+            decorations.append((rule.start, rule.end, "rule", rule))
+        for table in self._analysis.tables:
+            decorations.append((table.start, table.end, "table", table))
+        for marker in self._analysis.list_markers:
+            decorations.append((marker.start, marker.end, "list_marker", marker))
+        for expression in self._analysis.math_expressions:
+            if any(table.start <= expression.start and expression.end <= table.end for table in self._analysis.tables):
+                continue
+            decorations.append((expression.start, expression.end, "math", expression))
+        return decorations
+
+    @staticmethod
+    def _should_mount_decoration(
+        record: _DecorationRecord,
+        insert_offset: int,
+        active_line_start: int,
+        active_line_end: int,
+    ) -> bool:
+        if record.decoration_type == "rule":
+            return not record.start <= insert_offset <= record.end
+        if record.decoration_type == "table":
+            return not record.start <= insert_offset < record.end
+        return record.end <= active_line_start or record.start >= active_line_end
+
+    def _create_decoration_widget(self, record: _DecorationRecord) -> tk.Widget:
+        if record.decoration_type == "rule":
+            return self._create_horizontal_rule_widget()
+        if record.decoration_type == "table":
+            return self._create_table_widget(record.decoration)  # type: ignore[arg-type]
+        if record.decoration_type == "list_marker":
+            return self._create_list_marker_widget(record.decoration)  # type: ignore[arg-type]
+        return self._create_math_widget(record.decoration)  # type: ignore[arg-type]
+
+    def _mount_decoration(self, record: _DecorationRecord) -> None:
+        if record.widget is not None:
+            return
+        widget = self._create_decoration_widget(record)
+        self.editor.window_create(record.start_mark, window=widget, align="center")
+        self._bind_editor_decoration_events(widget)
+        self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
+        record.widget = widget
+        self._decoration_widgets.append(widget)
+
+    def _unmount_decoration(self, record: _DecorationRecord) -> None:
+        widget = record.widget
+        if widget is None:
+            return
+        try:
+            window_index = self.editor.index(str(widget))
+            self.editor.delete(window_index)
+        except tk.TclError:
+            pass
+        try:
+            widget.destroy()
+        except tk.TclError:
+            pass
+        try:
+            self._decoration_widgets.remove(widget)
+        except ValueError:
+            pass
+        record.widget = None
+        self.editor.tag_remove("marker_hidden", record.start_mark, record.end_mark)
+        self._set_marker_visibility(record.start_mark, record.end_mark, hidden=True)
+
+    def _sync_block_decorations(
+        self,
+        insert_offset: int,
+        active_line_start: int,
+        active_line_end: int,
+    ) -> None:
+        if not self.hide_markers.get():
+            return
+        records_to_unmount: list[_DecorationRecord] = []
+        records_to_mount: list[_DecorationRecord] = []
+        for record in self._decoration_records:
+            should_mount = self._should_mount_decoration(
+                record,
+                insert_offset,
+                active_line_start,
+                active_line_end,
+            )
+            if record.widget is not None and not should_mount:
+                records_to_unmount.append(record)
+            elif record.widget is None and should_mount:
+                records_to_mount.append(record)
+
+        for record in sorted(records_to_unmount, key=lambda item: item.start, reverse=True):
+            self._unmount_decoration(record)
+        for record in sorted(records_to_mount, key=lambda item: item.start, reverse=True):
+            self._mount_decoration(record)
 
     def _decoration_width(self) -> int:
         return max(280, self.editor.winfo_width() - 70)
@@ -865,7 +1098,7 @@ class MarkdownQuickMemoApp:
             return "break"
         self.editor.mark_set("insert", f"{window_index} + 1c")
         self.editor.focus_set()
-        self.render_markdown()
+        self._on_cursor_moved()
         return "break"
 
     def _forward_editor_mousewheel(self, event: tk.Event) -> str | None:
@@ -1020,6 +1253,7 @@ class MarkdownQuickMemoApp:
             "_render_job",
             "_resize_job",
             "_math_preload_job",
+            "_script_font_tag_job",
         ):
             job = getattr(self, attribute)
             if job is None:
@@ -1128,25 +1362,29 @@ class MarkdownQuickMemoApp:
         self.editor.see("insert")
         self.editor.edit_separator()
         self.dirty = True
+        self._analysis_stale = True
+        self._document_statistics_dirty = True
         self._schedule_render()
         self._update_title_and_status()
         self.editor.focus_set()
 
     def show_search(self, _event: tk.Event | None = None) -> str:
+        search_frame, search_entry = self._ensure_search_widgets()
         if not self._search_visible:
-            self.search_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
+            search_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
             self._search_visible = True
         selected = self._selection_indices()
         if selected:
-            self.search_entry.delete(0, "end")
-            self.search_entry.insert(0, self.editor.get(*selected))
-        self.search_entry.focus_set()
-        self.search_entry.selection_range(0, "end")
+            search_entry.delete(0, "end")
+            search_entry.insert(0, self.editor.get(*selected))
+        search_entry.focus_set()
+        search_entry.selection_range(0, "end")
         self.highlight_search_matches()
         return self._break()
 
     def hide_search(self) -> str:
-        self.search_frame.grid_remove()
+        if self.search_frame is not None:
+            self.search_frame.grid_remove()
         self.editor.tag_remove("search_match", "1.0", "end")
         self.editor.tag_remove("search_current", "1.0", "end")
         self._search_visible = False
@@ -1156,6 +1394,8 @@ class MarkdownQuickMemoApp:
     def highlight_search_matches(self) -> None:
         self.editor.tag_remove("search_match", "1.0", "end")
         self.editor.tag_remove("search_current", "1.0", "end")
+        if self.search_entry is None:
+            return
         query = self.search_entry.get()
         if not query:
             return
@@ -1169,6 +1409,8 @@ class MarkdownQuickMemoApp:
             start = end
 
     def find_next(self, event: tk.Event | None = None, *, backwards: bool = False) -> str:
+        if self.search_entry is None:
+            return self._break()
         query = self.search_entry.get()
         if not query:
             return self._break()
@@ -1243,15 +1485,24 @@ class MarkdownQuickMemoApp:
         name = self.current_path.name if self.current_path else "無題.md"
         marker = " *" if self.dirty else ""
         self.root.title(f"{name}{marker} — {APP_NAME}")
-        text = self.editor.get("1.0", "end-1c")
-        words = len(text.split())
+        if self._document_statistics_dirty:
+            self._set_document_statistics(self.editor.get("1.0", "end-1c"))
         line, column = self.editor.index("insert").split(".")
         state = "未保存" if self.dirty else "保存済み"
         if self.current_path is None and not self.dirty:
             state = "新規"
-        parts = [name, state, f"{len(text)}文字", f"{words}語", f"行 {line}, 列 {int(column) + 1}"]
-        if self.transparent_mode.get():
-            parts.append(f"透過 {round(TRANSLUCENT_WINDOW_ALPHA * 100)}%")
+        parts = [
+            name,
+            state,
+            f"{self._character_count}文字",
+            f"{self._word_count}語",
+            f"行 {line}, 列 {int(column) + 1}",
+        ]
         if message:
             parts.append(message)
         self.status_text.set("  |  ".join(parts))
+
+    def _set_document_statistics(self, text: str) -> None:
+        self._character_count = len(text)
+        self._word_count = len(text.split())
+        self._document_statistics_dirty = False
