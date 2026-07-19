@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.spec
+.coverage
+htmlcov/
+
+# Local Python environments and secrets
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+
+# Local editor and agent settings
+.agents/
+.codex/
+.idea/
+.vscode/
+
+# Windows-local files
+*.lnk
+Thumbs.db
+Desktop.ini
