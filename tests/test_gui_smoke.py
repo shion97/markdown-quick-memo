@@ -391,9 +391,14 @@ class GuiSmokeTests(unittest.TestCase):
     def test_active_heading_math_source_uses_heading_size(self) -> None:
         markdown = "# 見出し $x^2$"
         self.app._replace_text(markdown)
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.app._activate_decoration_line(math_record.widget)
         math_index = self.app.editor.search("x^2", "1.0")
-        self.app.editor.mark_set("insert", math_index)
-        self.app.render_markdown()
 
         font_tag = "script_font_latin_math_heading1"
         font_name = self.app.editor.tag_cget(font_tag, "font")
@@ -401,6 +406,26 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertIn(font_tag, self.app.editor.tag_names(math_index))
         self.assertEqual(source_font.actual("size"), HEADING_FONT_SIZES[0])
+
+    def test_single_heading_line_shows_math_preview_and_click_restores_source(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.assertTrue(hasattr(math_record.widget, "image"))
+
+        self.app._activate_decoration_line(math_record.widget)
+
+        self.assertIsNone(math_record.widget)
+        math_index = self.app.editor.search("x^2", "1.0")
+        self.assertIn("math_inline", self.app.editor.tag_names(math_index))
 
     def test_structured_display_math_and_table_cell_math_render(self) -> None:
         markdown = (

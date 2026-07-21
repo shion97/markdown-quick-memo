@@ -524,6 +524,16 @@ class MarkdownQuickMemoApp:
             else:
                 self._refresh_active_line(previous_line)
         else:
+            if not self._analysis_stale:
+                insert_index = self.editor.index("insert")
+                insert_offset = len(self.editor.get("1.0", insert_index))
+                active_line_start = self.editor.index(f"{insert_index} linestart")
+                active_line_end = self.editor.index(f"{insert_index} lineend +1c")
+                self._sync_block_decorations(
+                    insert_offset,
+                    len(self.editor.get("1.0", active_line_start)),
+                    len(self.editor.get("1.0", active_line_end)),
+                )
             self._highlight_current_line()
             self._update_title_and_status()
 
@@ -766,6 +776,8 @@ class MarkdownQuickMemoApp:
         if record.decoration_type == "rule":
             return not record.start <= insert_offset <= record.end
         if record.decoration_type == "table":
+            return not record.start <= insert_offset < record.end
+        if record.decoration_type == "math":
             return not record.start <= insert_offset < record.end
         return record.end <= active_line_start or record.start >= active_line_end
 
