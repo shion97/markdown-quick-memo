@@ -221,7 +221,7 @@ class MarkdownQuickMemoApp:
 
         self.editor = tk.Text(
             editor_frame,
-            wrap="word",
+            wrap="char",
             undo=True,
             autoseparators=True,
             maxundo=-1,

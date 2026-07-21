@@ -97,6 +97,36 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         self.assertEqual(len(self.app._decoration_widgets), 4)
 
+    def test_editor_wraps_at_character_boundary_across_styles_and_spaces(self) -> None:
+        self.root.minsize(480, 360)
+        self.root.geometry("480x360+10000+10000")
+        self.root.deiconify()
+        self.root.update()
+
+        emphasis_prefix = "aaaaaa**a**"
+        space_prefix = "ｑ" * 25 + " "
+        cases = (
+            (emphasis_prefix + "a" * 87 + " ", len(emphasis_prefix)),
+            (space_prefix + "ｆ" + "ｄ" * 12, len(space_prefix)),
+        )
+        for markdown, premature_wrap_offset in cases:
+            with self.subTest(markdown=markdown):
+                self.app._replace_text(f"{markdown}\nカーソル")
+                self.app.editor.mark_set("insert", "2.0")
+                self.app.render_markdown()
+                self.root.update()
+
+                second_display_line = self.app.editor.index("1.0 + 1 display lines")
+                wrap_offset = self.app.editor.count(
+                    "1.0",
+                    second_display_line,
+                    "chars",
+                )[0]
+
+                self.assertEqual(self.app.editor.cget("wrap"), "char")
+                self.assertLess(wrap_offset, len(markdown))
+                self.assertGreater(wrap_offset, premature_wrap_offset)
+
     def test_list_preview_uses_sequential_and_nested_markers(self) -> None:
         markdown = "1. 1番目\n1. 2番目\n   - 子要素\n   1. 子番号\n\nカーソル行"
         self.app._replace_text(markdown)
