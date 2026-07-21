@@ -797,6 +797,10 @@ class MarkdownQuickMemoApp:
         self.editor.window_create(record.start_mark, window=widget, align="center")
         self._bind_editor_decoration_events(widget)
         self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
+        window_index = self.editor.index(str(widget))
+        window_end = f"{window_index} +1c"
+        for marker_tag in ("marker", "marker_concealable", "marker_hidden"):
+            self.editor.tag_remove(marker_tag, window_index, window_end)
         record.widget = widget
         self._decoration_widgets.append(widget)
 

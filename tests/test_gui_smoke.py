@@ -427,6 +427,34 @@ class GuiSmokeTests(unittest.TestCase):
         math_index = self.app.editor.search("x^2", "1.0")
         self.assertIn("math_inline", self.app.editor.tag_names(math_index))
 
+    def test_heading_leading_math_preview_is_not_hidden_with_heading_marker(self) -> None:
+        cases = (
+            "# $P=NP$",
+            "# $P=NP$問題",
+            "# 問題$P=NP$",
+        )
+        for heading in cases:
+            with self.subTest(heading=heading):
+                self.app._replace_text(f"{heading}\n\nカーソル")
+                self.app.editor.mark_set("insert", "end-1c")
+                self.app.render_markdown()
+                self.root.update_idletasks()
+
+                math_record = next(
+                    record
+                    for record in self.app._decoration_records
+                    if record.decoration_type == "math"
+                )
+                self.assertIsNotNone(math_record.widget)
+                for cursor_index in ("1.0 lineend", "end-1c"):
+                    self.app.editor.mark_set("insert", cursor_index)
+                    self.app._on_cursor_moved()
+                    window_index = self.app.editor.index(str(math_record.widget))
+                    window_tags = self.app.editor.tag_names(window_index)
+
+                    self.assertNotIn("marker_hidden", window_tags)
+                    self.assertNotIn("marker_concealable", window_tags)
+
     def test_structured_display_math_and_table_cell_math_render(self) -> None:
         markdown = (
             "$$f(x)=\\begin{cases}x^2&x\\geq 0\\\\-x&x<0\\end{cases}$$\n\n"
