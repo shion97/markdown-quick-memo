@@ -44,6 +44,10 @@ TABLE_LINE_COLOR = "#94a3b8"
 TABLE_LINE_WIDTH = 1
 TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
+HEADING_MATH_FONT_SCALE = 0.9
+HEADING_MATH_FONT_SIZES = tuple(
+    round(size * HEADING_MATH_FONT_SCALE) for size in HEADING_FONT_SIZES
+)
 INLINE_MATH_FONT_SIZE = 8
 DISPLAY_MATH_FONT_SIZE = 15
 INLINE_MATH_DISPLAY_DPI = 120
@@ -393,6 +397,11 @@ class MarkdownQuickMemoApp:
             ("latin", self._latin_font_family),
             ("japanese", self._japanese_font_family),
         ):
+            math_family = (
+                MATH_SOURCE_FONT_FAMILY
+                if script == "latin"
+                else self._japanese_font_family
+            )
             font_specs = {
                 "body": self._create_font(family, 11),
                 "bold": self._create_font(family, 11, weight="bold"),
@@ -408,11 +417,15 @@ class MarkdownQuickMemoApp:
                     weight="bold",
                 ),
                 "math": self._create_font(
-                    MATH_SOURCE_FONT_FAMILY if script == "latin" else self._japanese_font_family,
+                    math_family,
                     12,
                 ),
             }
             for level, size in enumerate(heading_sizes, start=1):
+                font_specs[f"math_heading{level}"] = self._create_font(
+                    math_family,
+                    HEADING_MATH_FONT_SIZES[level - 1],
+                )
                 font_specs[f"heading{level}"] = self._create_font(family, size, weight="bold")
                 font_specs[f"heading{level}_italic"] = self._create_font(
                     family,
@@ -518,6 +531,16 @@ class MarkdownQuickMemoApp:
             else:
                 self._refresh_active_line(previous_line)
         else:
+            if not self._analysis_stale:
+                insert_index = self.editor.index("insert")
+                insert_offset = len(self.editor.get("1.0", insert_index))
+                active_line_start = self.editor.index(f"{insert_index} linestart")
+                active_line_end = self.editor.index(f"{insert_index} lineend +1c")
+                self._sync_block_decorations(
+                    insert_offset,
+                    len(self.editor.get("1.0", active_line_start)),
+                    len(self.editor.get("1.0", active_line_end)),
+                )
             self._highlight_current_line()
             self._update_title_and_status()
 
@@ -761,6 +784,8 @@ class MarkdownQuickMemoApp:
             return not record.start <= insert_offset <= record.end
         if record.decoration_type == "table":
             return not record.start <= insert_offset < record.end
+        if record.decoration_type == "math":
+            return not record.start <= insert_offset < record.end
         return record.end <= active_line_start or record.start >= active_line_end
 
     def _create_decoration_widget(self, record: _DecorationRecord) -> tk.Widget:
@@ -779,6 +804,10 @@ class MarkdownQuickMemoApp:
         self.editor.window_create(record.start_mark, window=widget, align="center")
         self._bind_editor_decoration_events(widget)
         self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
+        window_index = self.editor.index(str(widget))
+        window_end = f"{window_index} +1c"
+        for marker_tag in ("marker", "marker_concealable", "marker_hidden"):
+            self.editor.tag_remove(marker_tag, window_index, window_end)
         record.widget = widget
         self._decoration_widgets.append(widget)
 
@@ -878,7 +907,7 @@ class MarkdownQuickMemoApp:
         elif inline_font_size is not None:
             font_size = inline_font_size
         elif expression.heading_level is not None:
-            font_size = HEADING_FONT_SIZES[expression.heading_level - 1]
+            font_size = HEADING_MATH_FONT_SIZES[expression.heading_level - 1]
         else:
             font_size = INLINE_MATH_FONT_SIZE
         try:

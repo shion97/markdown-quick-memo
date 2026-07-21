@@ -11,6 +11,8 @@ from markdown_quick_memo.app import (
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
+    HEADING_FONT_SIZES,
+    HEADING_MATH_FONT_SIZES,
     INLINE_MATH_DISPLAY_DPI,
     INLINE_MATH_FONT_SIZE,
     INLINE_MATH_RENDER_DPI,
@@ -386,6 +388,74 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(len(heights), 2)
         self.assertGreater(heights[1], heights[0])
+
+    def test_active_heading_math_source_uses_heading_size(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.app._activate_decoration_line(math_record.widget)
+        math_index = self.app.editor.search("x^2", "1.0")
+
+        font_tag = "script_font_latin_math_heading1"
+        font_name = self.app.editor.tag_cget(font_tag, "font")
+        source_font = tkfont.Font(root=self.root, font=font_name)
+
+        self.assertIn(font_tag, self.app.editor.tag_names(math_index))
+        self.assertEqual(source_font.actual("size"), HEADING_MATH_FONT_SIZES[0])
+        self.assertLess(source_font.actual("size"), HEADING_FONT_SIZES[0])
+
+    def test_single_heading_line_shows_math_preview_and_click_restores_source(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.assertTrue(hasattr(math_record.widget, "image"))
+
+        self.app._activate_decoration_line(math_record.widget)
+
+        self.assertIsNone(math_record.widget)
+        math_index = self.app.editor.search("x^2", "1.0")
+        self.assertIn("math_inline", self.app.editor.tag_names(math_index))
+
+    def test_heading_leading_math_preview_is_not_hidden_with_heading_marker(self) -> None:
+        cases = (
+            "# $P=NP$",
+            "# $P=NP$問題",
+            "# 問題$P=NP$",
+        )
+        for heading in cases:
+            with self.subTest(heading=heading):
+                self.app._replace_text(f"{heading}\n\nカーソル")
+                self.app.editor.mark_set("insert", "end-1c")
+                self.app.render_markdown()
+                self.root.update_idletasks()
+
+                math_record = next(
+                    record
+                    for record in self.app._decoration_records
+                    if record.decoration_type == "math"
+                )
+                self.assertIsNotNone(math_record.widget)
+                for cursor_index in ("1.0 lineend", "end-1c"):
+                    self.app.editor.mark_set("insert", cursor_index)
+                    self.app._on_cursor_moved()
+                    window_index = self.app.editor.index(str(math_record.widget))
+                    window_tags = self.app.editor.tag_names(window_index)
+
+                    self.assertNotIn("marker_hidden", window_tags)
+                    self.assertNotIn("marker_concealable", window_tags)
 
     def test_structured_display_math_and_table_cell_math_render(self) -> None:
         markdown = (

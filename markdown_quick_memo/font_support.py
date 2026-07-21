@@ -111,14 +111,17 @@ def _font_style(active_tags: Counter[str]) -> str:
         return "mono_bold"
     if any(active_tags[tag] for tag in ("inline_code", "code_block", "table", "table_delimiter")):
         return "mono"
-    if active_tags["math_inline"] or active_tags["math_block"]:
-        return "math"
 
+    math = active_tags["math_inline"] or active_tags["math_block"]
     italic = active_tags["italic"] or active_tags["bold_italic"]
     for level in range(1, 7):
         heading = f"heading{level}"
         if active_tags[heading]:
+            if math:
+                return f"math_{heading}"
             return f"{heading}_italic" if italic else heading
+    if math:
+        return "math"
 
     bold = active_tags["bold"] or active_tags["bold_italic"]
     bold = bold or active_tags["quote_marker"] or active_tags["list_marker"]
