@@ -44,6 +44,10 @@ TABLE_LINE_COLOR = "#94a3b8"
 TABLE_LINE_WIDTH = 1
 TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
+HEADING_MATH_FONT_SCALE = 0.9
+HEADING_MATH_FONT_SIZES = tuple(
+    round(size * HEADING_MATH_FONT_SCALE) for size in HEADING_FONT_SIZES
+)
 INLINE_MATH_FONT_SIZE = 8
 DISPLAY_MATH_FONT_SIZE = 15
 INLINE_MATH_DISPLAY_DPI = 120
@@ -418,7 +422,10 @@ class MarkdownQuickMemoApp:
                 ),
             }
             for level, size in enumerate(heading_sizes, start=1):
-                font_specs[f"math_heading{level}"] = self._create_font(math_family, size)
+                font_specs[f"math_heading{level}"] = self._create_font(
+                    math_family,
+                    HEADING_MATH_FONT_SIZES[level - 1],
+                )
                 font_specs[f"heading{level}"] = self._create_font(family, size, weight="bold")
                 font_specs[f"heading{level}_italic"] = self._create_font(
                     family,
@@ -900,7 +907,7 @@ class MarkdownQuickMemoApp:
         elif inline_font_size is not None:
             font_size = inline_font_size
         elif expression.heading_level is not None:
-            font_size = HEADING_FONT_SIZES[expression.heading_level - 1]
+            font_size = HEADING_MATH_FONT_SIZES[expression.heading_level - 1]
         else:
             font_size = INLINE_MATH_FONT_SIZE
         try:

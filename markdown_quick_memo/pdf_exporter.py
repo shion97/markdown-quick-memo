@@ -30,6 +30,10 @@ PDF_LIST_NUMBER_OFFSET_Y = PDF_LIST_NUMBER_FONT_SIZE - PDF_BODY_FONT_SIZE
 PDF_TABLE_LINE_WIDTH = 0.8
 PDF_TABLE_STRONG_LINE_WIDTH = PDF_TABLE_LINE_WIDTH * 2
 PDF_HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
+PDF_HEADING_MATH_FONT_SCALE = 0.9
+PDF_HEADING_MATH_FONT_SIZES = tuple(
+    round(size * PDF_HEADING_MATH_FONT_SCALE) for size in PDF_HEADING_FONT_SIZES
+)
 PDF_INLINE_MATH_FONT_SIZE = 8
 PDF_TABLE_MATH_FONT_SIZE = 10
 PDF_DISPLAY_MATH_FONT_SIZE = 15
@@ -347,7 +351,7 @@ def _prepare_math_assets(markdown_text: str, temporary_directory: Path) -> tuple
         if expression.display:
             font_size = PDF_DISPLAY_MATH_FONT_SIZE
         elif expression.heading_level is not None:
-            font_size = PDF_HEADING_FONT_SIZES[expression.heading_level - 1]
+            font_size = PDF_HEADING_MATH_FONT_SIZES[expression.heading_level - 1]
         elif any(table.start <= expression.start < table.end for table in analysis.tables):
             font_size = PDF_TABLE_MATH_FONT_SIZE
         else:

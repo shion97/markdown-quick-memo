@@ -8,6 +8,7 @@ from PIL import Image
 from markdown_quick_memo.pdf_exporter import (
     PDF_BODY_FONT_SIZE,
     PDF_HEADING_FONT_SIZES,
+    PDF_HEADING_MATH_FONT_SIZES,
     PDF_INLINE_MATH_DPI,
     PDF_LIST_BULLET_FONT_SIZE,
     PDF_LIST_NUMBER_OFFSET_Y,
@@ -40,7 +41,17 @@ class PdfExporterTests(unittest.TestCase):
             assets = list(math_assets.values())
             self.assertEqual(
                 [asset.font_size for asset in assets],
-                list(PDF_HEADING_FONT_SIZES),
+                list(PDF_HEADING_MATH_FONT_SIZES),
+            )
+            self.assertTrue(
+                all(
+                    math_size < heading_size
+                    for math_size, heading_size in zip(
+                        PDF_HEADING_MATH_FONT_SIZES,
+                        PDF_HEADING_FONT_SIZES,
+                        strict=True,
+                    )
+                )
             )
             self.assertTrue(
                 all(asset.path is not None and asset.path.is_file() for asset in assets)
@@ -89,7 +100,7 @@ class PdfExporterTests(unittest.TestCase):
             self.assertEqual(sum(asset.display for asset in math_assets.values()), 11)
             self.assertEqual(
                 {asset.font_size for asset in math_assets.values()},
-                {8, 10, 15, 22},
+                {8, 10, 15, PDF_HEADING_MATH_FONT_SIZES[0]},
             )
             self.assertTrue(
                 all(
