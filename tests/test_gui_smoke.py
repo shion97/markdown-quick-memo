@@ -178,7 +178,15 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(int(title_label.grid_info()["column"]), 0)
         self.assertEqual(int(self.app.status_label.grid_info()["column"]), 1)
         self.assertEqual(int(marker_toggle.grid_info()["column"]), 2)
-        self.assertNotEqual(self.app.status_text.get(), "")
+        self.assertIn("新規", self.app.status_text.get())
+        self.assertNotIn("無題.md", self.app.status_text.get())
+
+        self.app.current_path = Path("saved-memo.md")
+        self.app._update_title_and_status()
+
+        self.assertIn("保存済み", self.app.status_text.get())
+        self.assertNotIn("saved-memo.md", self.app.status_text.get())
+        self.assertIn("saved-memo.md", self.root.title())
 
     def test_pdf_export_saves_markdown_before_writing_pdf(self) -> None:
         self.app._replace_text("# PDF")

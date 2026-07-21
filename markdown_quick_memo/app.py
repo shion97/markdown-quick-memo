@@ -1553,7 +1553,6 @@ class MarkdownQuickMemoApp:
         if self.current_path is None and not self.dirty:
             state = "新規"
         parts = [
-            name,
             state,
             f"{self._character_count}文字",
             f"{self._word_count}語",
