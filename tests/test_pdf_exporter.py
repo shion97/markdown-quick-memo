@@ -137,6 +137,29 @@ class PdfExporterTests(unittest.TestCase):
             [False, False, True, True, False, True],
         )
 
+    def test_list_continuation_keeps_inline_markdown_inside_the_item(self) -> None:
+        markdown = (
+            "10. **Question:** What is the conclusion\n"
+            "    **質問:** 結論は何ですか？\n\n"
+            "* **Answer:** It depends."
+        )
+
+        prepared_markdown, list_assets = _prepare_list_assets(markdown)
+        items = [
+            item
+            for block in list_assets.values()
+            for item in block.items
+        ]
+
+        self.assertEqual(
+            items[0].content,
+            "**Question:** What is the conclusion\n**質問:** 結論は何ですか？",
+        )
+        self.assertNotIn("    **質問:**", prepared_markdown)
+        rendered_content = _markdown_to_html(items[0].content)
+        self.assertIn("<strong>質問:</strong>", rendered_content)
+        self.assertNotIn("<pre>", rendered_content)
+
     def test_underscore_emphasis_and_escaped_dollar_match_editor_syntax(self) -> None:
         rendered_html = _markdown_to_html(
             r"__太字__、_斜体_、___太字斜体___、\$数式ではない\$"

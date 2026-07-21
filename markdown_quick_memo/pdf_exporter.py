@@ -428,6 +428,10 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
     line_starts = [0]
     line_starts.extend(match.end() for match in re.finditer(r"\n", markdown_text))
     line_start_to_number = {start: number for number, start in enumerate(line_starts)}
+    marker_line_starts = {
+        markdown_text.rfind("\n", 0, marker.start) + 1
+        for marker in markers
+    }
     records: list[tuple[int, int, int, _ListItemAsset]] = []
     for marker in markers:
         line_start = markdown_text.rfind("\n", 0, marker.start) + 1
@@ -437,13 +441,33 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
         content_start = marker.end
         while content_start < line_end and markdown_text[content_start] in " \t":
             content_start += 1
+        content_indentation = content_start - line_start
+        content_lines = [markdown_text[content_start:line_end]]
+        item_end = line_end
+        continuation_line_number = line_start_to_number[line_start] + 1
+        while continuation_line_number < len(line_starts):
+            continuation_start = line_starts[continuation_line_number]
+            if continuation_start in marker_line_starts:
+                break
+            continuation_end = markdown_text.find("\n", continuation_start)
+            if continuation_end == -1:
+                continuation_end = len(markdown_text)
+            continuation = markdown_text[continuation_start:continuation_end]
+            if not continuation.strip():
+                break
+            indentation = len(continuation) - len(continuation.lstrip(" \t"))
+            if indentation < content_indentation:
+                break
+            content_lines.append(continuation[content_indentation:])
+            item_end = continuation_end
+            continuation_line_number += 1
         records.append(
             (
                 line_start_to_number[line_start],
                 line_start,
-                line_end,
+                item_end,
                 _ListItemAsset(
-                    markdown_text[content_start:line_end],
+                    "\n".join(content_lines),
                     marker.label,
                     marker.depth,
                     marker.ordered,
@@ -453,7 +477,7 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
 
     groups: list[list[tuple[int, int, int, _ListItemAsset]]] = []
     for record in records:
-        if not groups or record[0] != groups[-1][-1][0] + 1:
+        if not groups or markdown_text[groups[-1][-1][2]:record[1]] != "\n":
             groups.append([record])
         else:
             groups[-1].append(record)
