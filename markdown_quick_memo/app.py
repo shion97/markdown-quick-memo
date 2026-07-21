@@ -393,6 +393,11 @@ class MarkdownQuickMemoApp:
             ("latin", self._latin_font_family),
             ("japanese", self._japanese_font_family),
         ):
+            math_family = (
+                MATH_SOURCE_FONT_FAMILY
+                if script == "latin"
+                else self._japanese_font_family
+            )
             font_specs = {
                 "body": self._create_font(family, 11),
                 "bold": self._create_font(family, 11, weight="bold"),
@@ -408,11 +413,12 @@ class MarkdownQuickMemoApp:
                     weight="bold",
                 ),
                 "math": self._create_font(
-                    MATH_SOURCE_FONT_FAMILY if script == "latin" else self._japanese_font_family,
+                    math_family,
                     12,
                 ),
             }
             for level, size in enumerate(heading_sizes, start=1):
+                font_specs[f"math_heading{level}"] = self._create_font(math_family, size)
                 font_specs[f"heading{level}"] = self._create_font(family, size, weight="bold")
                 font_specs[f"heading{level}_italic"] = self._create_font(
                     family,

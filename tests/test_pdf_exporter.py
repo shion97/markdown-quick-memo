@@ -7,6 +7,7 @@ from PIL import Image
 
 from markdown_quick_memo.pdf_exporter import (
     PDF_BODY_FONT_SIZE,
+    PDF_HEADING_FONT_SIZES,
     PDF_INLINE_MATH_DPI,
     PDF_LIST_BULLET_FONT_SIZE,
     PDF_LIST_NUMBER_OFFSET_Y,
@@ -25,6 +26,26 @@ from markdown_quick_memo.math_renderer import render_math_png
 
 
 class PdfExporterTests(unittest.TestCase):
+    def test_heading_inline_math_uses_heading_sizes(self) -> None:
+        markdown = "\n\n".join(
+            f"{'#' * level} 見出し{level} $x_{level}^2$"
+            for level in range(1, 7)
+        )
+        with TemporaryDirectory() as directory:
+            _prepared_markdown, math_assets = _prepare_math_assets(
+                markdown,
+                Path(directory),
+            )
+
+            assets = list(math_assets.values())
+            self.assertEqual(
+                [asset.font_size for asset in assets],
+                list(PDF_HEADING_FONT_SIZES),
+            )
+            self.assertTrue(
+                all(asset.path is not None and asset.path.is_file() for asset in assets)
+            )
+
     def test_inline_math_uses_high_resolution_without_changing_pdf_size(self) -> None:
         expression = r"E=mc^2"
         legacy_dpi = 120

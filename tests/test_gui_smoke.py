@@ -11,6 +11,7 @@ from markdown_quick_memo.app import (
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
+    HEADING_FONT_SIZES,
     INLINE_MATH_DISPLAY_DPI,
     INLINE_MATH_FONT_SIZE,
     INLINE_MATH_RENDER_DPI,
@@ -386,6 +387,20 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(len(heights), 2)
         self.assertGreater(heights[1], heights[0])
+
+    def test_active_heading_math_source_uses_heading_size(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        math_index = self.app.editor.search("x^2", "1.0")
+        self.app.editor.mark_set("insert", math_index)
+        self.app.render_markdown()
+
+        font_tag = "script_font_latin_math_heading1"
+        font_name = self.app.editor.tag_cget(font_tag, "font")
+        source_font = tkfont.Font(root=self.root, font=font_name)
+
+        self.assertIn(font_tag, self.app.editor.tag_names(math_index))
+        self.assertEqual(source_font.actual("size"), HEADING_FONT_SIZES[0])
 
     def test_structured_display_math_and_table_cell_math_render(self) -> None:
         markdown = (
