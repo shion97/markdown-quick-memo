@@ -26,13 +26,70 @@ class MarkdownStylerTests(unittest.TestCase):
         self.assertEqual([link.target for link in analysis.links], ["image.png", "https://openai.com"])
         self.assertEqual([link.is_image for link in analysis.links], [True, False])
 
-    def test_list_and_quote_markers_remain_visible(self) -> None:
+    def test_list_and_quote_markers_follow_preview_visibility(self) -> None:
         text = "- 箇条書き\n1. 番号付き\n> 引用"
         analysis = analyze_markdown(text)
         list_markers = [span for span in analysis.spans if span.tag == "list_marker"]
         quote_markers = [span for span in analysis.spans if span.tag == "quote_marker"]
         self.assertEqual([text[span.start : span.end] for span in list_markers], ["-", "1."])
-        self.assertTrue(all(not span.concealable for span in list_markers + quote_markers))
+        self.assertTrue(all(not span.concealable for span in list_markers))
+        self.assertTrue(all(span.concealable for span in quote_markers))
+
+    def test_quote_depth_and_lazy_continuation_follow_standard_structure(self) -> None:
+        text = (
+            "a\n"
+            "> b\n"
+            "> c\n"
+            ">> d\n"
+            "> e\n"
+            ">>> f\n"
+            "g\n\n"
+            "h\n"
+            ">invalid\n"
+            "> > nested"
+        )
+
+        analysis = analyze_markdown(text)
+
+        self.assertEqual(
+            [marker.depth for marker in analysis.quote_markers],
+            [1, 1, 2, 2, 3, 3, 2],
+        )
+        self.assertEqual(
+            [text[marker.start : marker.end] for marker in analysis.quote_markers],
+            ["> ", "> ", ">> ", "> ", ">>> ", "", "> > "],
+        )
+        quote_spans = [span for span in analysis.spans if span.tag == "quote"]
+        lazy_offset = text.index("\ng\n") + 1
+        invalid_offset = text.index(">invalid")
+        self.assertTrue(any(span.start <= lazy_offset < span.end for span in quote_spans))
+        self.assertFalse(any(span.start <= invalid_offset < span.end for span in quote_spans))
+        self.assertEqual(len(analysis.quote_blocks), 2)
+        self.assertEqual(
+            [line.depth for line in analysis.quote_blocks[0].lines],
+            [1, 1, 2, 2, 3, 3],
+        )
+        self.assertEqual(
+            [line.content for line in analysis.quote_blocks[0].lines],
+            ["b", "c", "d", "e", "f", "g"],
+        )
+
+        paragraph_break = analyze_markdown("> paragraph\n> \noutside")
+        outside_offset = len("> paragraph\n> \n")
+        paragraph_quote_spans = [
+            span for span in paragraph_break.spans if span.tag == "quote"
+        ]
+        self.assertFalse(
+            any(
+                span.start <= outside_offset < span.end
+                for span in paragraph_quote_spans
+            )
+        )
+        self.assertEqual(len(paragraph_break.quote_blocks), 1)
+        self.assertEqual(
+            [line.content for line in paragraph_break.quote_blocks[0].lines],
+            ["paragraph", ""],
+        )
 
     def test_ordered_and_mixed_nested_lists_get_preview_markers(self) -> None:
         text = (

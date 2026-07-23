@@ -7,14 +7,21 @@ $LauncherWasRunning = $LauncherProcesses.Count -gt 0
 $LauncherArguments = "--hotkey CTRL+ALT+M"
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $RunValueName = "MarkdownQuickMemoHotkey"
+$ScheduledTaskName = "Markdown Quick Memo Hotkey"
+
+$ScheduledTask = Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction SilentlyContinue
+$ScheduledArguments = $ScheduledTask.Actions.Arguments
+if ($ScheduledArguments -match '--hotkey\s+([^\s"]+)') {
+    $LauncherArguments = "--hotkey $($Matches[1])"
+}
 
 $SavedRunCommand = (Get-ItemProperty -Path $RunKeyPath -Name $RunValueName -ErrorAction SilentlyContinue).$RunValueName
-if ($SavedRunCommand -match '--hotkey\s+([^\s"]+)') {
+if (-not $ScheduledTask -and $SavedRunCommand -match '--hotkey\s+([^\s"]+)') {
     $LauncherArguments = "--hotkey $($Matches[1])"
 }
 
 $LauncherShortcutPath = Join-Path ([Environment]::GetFolderPath("Startup")) "Markdown Quick Memo Hotkey.lnk"
-if (-not $SavedRunCommand -and (Test-Path -LiteralPath $LauncherShortcutPath)) {
+if (-not $ScheduledTask -and -not $SavedRunCommand -and (Test-Path -LiteralPath $LauncherShortcutPath)) {
     $Shell = New-Object -ComObject WScript.Shell
     $SavedArguments = $Shell.CreateShortcut($LauncherShortcutPath).Arguments
     if ($SavedArguments -match '--hotkey\s+([^\s]+)') {

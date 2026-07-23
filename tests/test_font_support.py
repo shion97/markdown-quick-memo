@@ -33,6 +33,25 @@ class FontSupportTests(unittest.TestCase):
         self.assertEqual([run.style for run in runs], ["mono", "mono"])
         self.assertEqual([run.script for run in runs], ["latin", "japanese"])
 
+    def test_inline_math_in_heading_uses_heading_math_size(self) -> None:
+        text = "# 数式 $x^2$"
+        expression_start = text.index("x")
+        expression_end = expression_start + len("x^2")
+        spans = [
+            StyleSpan(0, len(text), "heading1"),
+            StyleSpan(expression_start, expression_end, "math_inline"),
+        ]
+
+        runs = build_font_runs(text, spans)
+
+        math_runs = [
+            run
+            for run in runs
+            if run.start < expression_end and run.end > expression_start
+        ]
+        self.assertTrue(math_runs)
+        self.assertTrue(all(run.style == "math_heading1" for run in math_runs))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,12 +30,20 @@ PDF_LIST_NUMBER_OFFSET_Y = PDF_LIST_NUMBER_FONT_SIZE - PDF_BODY_FONT_SIZE
 PDF_TABLE_LINE_WIDTH = 0.8
 PDF_TABLE_STRONG_LINE_WIDTH = PDF_TABLE_LINE_WIDTH * 2
 PDF_HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
+PDF_HEADING_MATH_FONT_SCALE = 0.9
+PDF_HEADING_MATH_FONT_SIZES = tuple(
+    round(size * PDF_HEADING_MATH_FONT_SCALE) for size in PDF_HEADING_FONT_SIZES
+)
 PDF_INLINE_MATH_FONT_SIZE = 8
 PDF_TABLE_MATH_FONT_SIZE = 10
 PDF_DISPLAY_MATH_FONT_SIZE = 15
 PDF_INLINE_MATH_DPI = 300
 PDF_DISPLAY_MATH_DPI = 150
 PDF_DISPLAY_MATH_VERTICAL_PADDING_POINTS = 2.0
+PDF_QUOTE_INDENT = 18
+PDF_QUOTE_BAR_WIDTH = 3
+PDF_QUOTE_BACKGROUNDS = ("#f3f4f6", "#e5e7eb", "#d1d5db")
+PDF_QUOTE_BAR_COLOR = "#60a5fa"
 
 _MATH_TOKEN_PREFIX = "MQMMATHTOKEN"
 _LIST_TOKEN_PREFIX = "MQMLISTTOKEN"
@@ -347,7 +355,7 @@ def _prepare_math_assets(markdown_text: str, temporary_directory: Path) -> tuple
         if expression.display:
             font_size = PDF_DISPLAY_MATH_FONT_SIZE
         elif expression.heading_level is not None:
-            font_size = PDF_HEADING_FONT_SIZES[expression.heading_level - 1]
+            font_size = PDF_HEADING_MATH_FONT_SIZES[expression.heading_level - 1]
         elif any(table.start <= expression.start < table.end for table in analysis.tables):
             font_size = PDF_TABLE_MATH_FONT_SIZE
         else:
@@ -424,6 +432,10 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
     line_starts = [0]
     line_starts.extend(match.end() for match in re.finditer(r"\n", markdown_text))
     line_start_to_number = {start: number for number, start in enumerate(line_starts)}
+    marker_line_starts = {
+        markdown_text.rfind("\n", 0, marker.start) + 1
+        for marker in markers
+    }
     records: list[tuple[int, int, int, _ListItemAsset]] = []
     for marker in markers:
         line_start = markdown_text.rfind("\n", 0, marker.start) + 1
@@ -433,13 +445,33 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
         content_start = marker.end
         while content_start < line_end and markdown_text[content_start] in " \t":
             content_start += 1
+        content_indentation = content_start - line_start
+        content_lines = [markdown_text[content_start:line_end]]
+        item_end = line_end
+        continuation_line_number = line_start_to_number[line_start] + 1
+        while continuation_line_number < len(line_starts):
+            continuation_start = line_starts[continuation_line_number]
+            if continuation_start in marker_line_starts:
+                break
+            continuation_end = markdown_text.find("\n", continuation_start)
+            if continuation_end == -1:
+                continuation_end = len(markdown_text)
+            continuation = markdown_text[continuation_start:continuation_end]
+            if not continuation.strip():
+                break
+            indentation = len(continuation) - len(continuation.lstrip(" \t"))
+            if indentation < content_indentation:
+                break
+            content_lines.append(continuation[content_indentation:])
+            item_end = continuation_end
+            continuation_line_number += 1
         records.append(
             (
                 line_start_to_number[line_start],
                 line_start,
-                line_end,
+                item_end,
                 _ListItemAsset(
-                    markdown_text[content_start:line_end],
+                    "\n".join(content_lines),
                     marker.label,
                     marker.depth,
                     marker.ordered,
@@ -449,7 +481,7 @@ def _prepare_list_assets(markdown_text: str) -> tuple[str, dict[str, _ListBlockA
 
     groups: list[list[tuple[int, int, int, _ListItemAsset]]] = []
     for record in records:
-        if not groups or record[0] != groups[-1][-1][0] + 1:
+        if not groups or markdown_text[groups[-1][-1][2]:record[1]] != "\n":
             groups.append([record])
         else:
             groups[-1].append(record)
@@ -493,6 +525,41 @@ def _normalize_list_indentation(markdown_text: str) -> str:
     return normalized
 
 
+def _escape_unspaced_quote_markers(markdown_text: str) -> str:
+    """Keep ``>text`` literal while preserving standard fenced code blocks."""
+
+    converted_lines: list[str] = []
+    fence_character = ""
+    fence_length = 0
+    for line in markdown_text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        line_ending = line[len(content) :]
+        fence = re.match(r"^( {0,3})(`{3,}|~{3,})", content)
+        if fence_character:
+            converted_lines.append(line)
+            if (
+                fence
+                and fence.group(2)[0] == fence_character
+                and len(fence.group(2)) >= fence_length
+                and not content[fence.end(2) :].strip()
+            ):
+                fence_character = ""
+                fence_length = 0
+            continue
+        if fence:
+            fence_character = fence.group(2)[0]
+            fence_length = len(fence.group(2))
+            converted_lines.append(line)
+            continue
+
+        quote_like = re.match(r"^( {0,3})(>+)(.*)$", content)
+        if quote_like and not quote_like.group(3).startswith(" "):
+            marker_start = quote_like.start(2)
+            content = f"{content[:marker_start]}\\{content[marker_start:]}"
+        converted_lines.append(content + line_ending)
+    return "".join(converted_lines)
+
+
 def _markdown_to_html(markdown_text: str) -> str:
     import markdown
     from markdown.extensions import Extension
@@ -509,7 +576,11 @@ def _markdown_to_html(markdown_text: str) -> str:
             )
 
     return markdown.markdown(
-        _convert_task_markers(_normalize_list_indentation(markdown_text)),
+        _convert_task_markers(
+            _normalize_list_indentation(
+                _escape_unspaced_quote_markers(markdown_text)
+            )
+        ),
         extensions=["extra", "legacy_em", "sane_lists", "nl2br", _StrikethroughExtension()],
         output_format="html5",
     )
@@ -603,9 +674,9 @@ class _PdfFlowableRenderer:
                 fontSize=PDF_BODY_FONT_SIZE,
                 leading=16,
                 textColor=colors.HexColor("#4b5563"),
-                leftIndent=14,
-                rightIndent=6,
-                spaceAfter=6,
+                leftIndent=0,
+                rightIndent=0,
+                spaceAfter=4,
             ),
             "list": ParagraphStyle(
                 "MQMList",
@@ -716,7 +787,10 @@ class _PdfFlowableRenderer:
         if re.fullmatch(r"h[1-6]", tag):
             return [self._paragraph(self._inline_markup(node, bold=True), tag)]
         if tag == "blockquote":
-            return self._render_children(node, quote_depth=quote_depth + 1)
+            return [
+                self._quote_flowable(node, quote_depth=quote_depth + 1),
+                Spacer(1, 6),
+            ]
         if tag in {"ul", "ol"}:
             return [self._list_flowable(node, depth=0, quote_depth=quote_depth)]
         if tag == "pre":
@@ -753,20 +827,62 @@ class _PdfFlowableRenderer:
     def _paragraph(self, markup: str, style_name: str, *, quote_depth: int = 0):
         from reportlab.platypus import Paragraph
 
-        style = self.styles[style_name]
-        if quote_depth and style_name == "quote":
-            markup = self._quote_markup(markup, quote_depth)
-        if quote_depth <= 1 or style_name != "quote":
-            return Paragraph(markup, style)
-        derived_style = style.clone(f"MQMQuoteDepth{quote_depth}")
-        derived_style.leftIndent += (quote_depth - 1) * 12
-        return Paragraph(markup, derived_style)
+        return Paragraph(markup, self.styles[style_name])
 
-    @staticmethod
-    def _quote_markup(markup: str, quote_depth: int) -> str:
-        markers = " ".join("&gt;" for _ in range(quote_depth))
-        marker = f'<font color="#94a3b8"><b>{markers}</b></font> '
-        return marker + markup.replace("<br/>", f"<br/>{marker}")
+    def _quote_flowable(self, node: _HtmlNode, *, quote_depth: int):
+        from reportlab.lib import colors
+        from reportlab.platypus import Table, TableStyle
+
+        flowables: list[object] = []
+        for child in node.children:
+            if isinstance(child, str):
+                if child.strip():
+                    flowables.append(
+                        self._paragraph(
+                            _text_font_markup(child.strip(), self.fonts),
+                            "quote",
+                        )
+                    )
+                continue
+            if child.tag == "blockquote":
+                flowables.append(
+                    self._quote_flowable(child, quote_depth=quote_depth + 1)
+                )
+            else:
+                flowables.extend(
+                    self._render_block(child, quote_depth=quote_depth)
+                )
+        if not flowables:
+            flowables.append(self._paragraph("&#160;", "quote"))
+
+        width = max(
+            72,
+            self.available_width - (quote_depth - 1) * PDF_QUOTE_INDENT,
+        )
+        background = PDF_QUOTE_BACKGROUNDS[
+            min(quote_depth - 1, len(PDF_QUOTE_BACKGROUNDS) - 1)
+        ]
+        table = Table([[flowables]], colWidths=[width])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(background)),
+                    (
+                        "LINEBEFORE",
+                        (0, 0),
+                        (0, -1),
+                        PDF_QUOTE_BAR_WIDTH,
+                        colors.HexColor(PDF_QUOTE_BAR_COLOR),
+                    ),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        return table
 
     def _paragraph_flowables(
         self,

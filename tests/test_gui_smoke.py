@@ -11,11 +11,16 @@ from markdown_quick_memo.app import (
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
     DISPLAY_MATH_VERTICAL_PADDING_POINTS,
+    HEADING_FONT_SIZES,
+    HEADING_MATH_FONT_SIZES,
     INLINE_MATH_DISPLAY_DPI,
     INLINE_MATH_FONT_SIZE,
     INLINE_MATH_RENDER_DPI,
     INLINE_MATH_TOP_PADDING,
     MarkdownQuickMemoApp,
+    QUOTE_BACKGROUNDS,
+    QUOTE_BACKGROUND_TRAILING_CHARS,
+    QUOTE_WRAP_EXTENSION_CHARS,
     TABLE_LINE_COLOR,
     TABLE_LINE_WIDTH,
     TABLE_STRONG_LINE_WIDTH,
@@ -68,6 +73,7 @@ class GuiSmokeTests(unittest.TestCase):
             )
         )
         self.assertFalse(self.app.dirty)
+
         image_widgets = []
         for widget in self.app._decoration_widgets:
             image_widgets.extend(child for child in [widget, *widget.winfo_children()] if hasattr(child, "image"))
@@ -95,6 +101,57 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         self.assertEqual(len(self.app._decoration_widgets), 4)
 
+    def test_resident_window_can_hide_without_discarding_document(self) -> None:
+        resident_root = tk.Tk()
+        resident_root.withdraw()
+        resident_app: MarkdownQuickMemoApp | None = None
+        try:
+            resident_app = MarkdownQuickMemoApp(resident_root, resident=True)
+            resident_app.editor.insert("1.0", "待機中のメモ")
+
+            resident_app.hide_window()
+
+            self.assertEqual(resident_root.state(), "withdrawn")
+            self.assertIsNone(resident_app._math_preload_job)
+            self.assertEqual(
+                resident_app.editor.get("1.0", "end-1c"),
+                "待機中のメモ",
+            )
+        finally:
+            if resident_app is not None:
+                resident_app._cancel_scheduled_jobs()
+            resident_root.destroy()
+
+    def test_editor_wraps_at_character_boundary_across_styles_and_spaces(self) -> None:
+        self.root.minsize(480, 360)
+        self.root.geometry("480x360+10000+10000")
+        self.root.deiconify()
+        self.root.update()
+
+        emphasis_prefix = "aaaaaa**a**"
+        space_prefix = "ｑ" * 25 + " "
+        cases = (
+            (emphasis_prefix + "a" * 87 + " ", len(emphasis_prefix)),
+            (space_prefix + "ｆ" + "ｄ" * 12, len(space_prefix)),
+        )
+        for markdown, premature_wrap_offset in cases:
+            with self.subTest(markdown=markdown):
+                self.app._replace_text(f"{markdown}\nカーソル")
+                self.app.editor.mark_set("insert", "2.0")
+                self.app.render_markdown()
+                self.root.update()
+
+                second_display_line = self.app.editor.index("1.0 + 1 display lines")
+                wrap_offset = self.app.editor.count(
+                    "1.0",
+                    second_display_line,
+                    "chars",
+                )[0]
+
+                self.assertEqual(self.app.editor.cget("wrap"), "char")
+                self.assertLess(wrap_offset, len(markdown))
+                self.assertGreater(wrap_offset, premature_wrap_offset)
+
     def test_list_preview_uses_sequential_and_nested_markers(self) -> None:
         markdown = "1. 1番目\n1. 2番目\n   - 子要素\n   1. 子番号\n\nカーソル行"
         self.app._replace_text(markdown)
@@ -116,6 +173,59 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(bullet_font.actual("size"), 6)
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
 
+    def test_quote_preview_uses_nested_bars_and_lazy_continuation(self) -> None:
+        markdown = "a\n> b\n> c\n>> d\n> e\n>>> f\ng\n\nh"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+
+        quote_records = [
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "quote_block"
+        ]
+
+        self.assertEqual(len(quote_records), 1)
+        quote_record = quote_records[0]
+        self.assertEqual(
+            [line.depth for line in quote_record.decoration.lines],
+            [1, 1, 2, 2, 3, 3],
+        )
+        self.assertIsInstance(quote_record.widget, tk.Canvas)
+        quote_canvas = quote_record.widget
+        half_width_character = tkfont.Font(
+            family=self.app._latin_font_family,
+            size=11,
+        ).measure("0")
+        base_width = self.app._decoration_width()
+        for depth, background in enumerate(QUOTE_BACKGROUNDS, start=1):
+            expected_right = (
+                base_width
+                - 8
+                + (
+                    QUOTE_WRAP_EXTENSION_CHARS[depth - 1]
+                    + QUOTE_BACKGROUND_TRAILING_CHARS
+                )
+                * half_width_character
+            )
+            background_rights = [
+                quote_canvas.coords(item)[2]
+                for item in quote_canvas.find_all()
+                if quote_canvas.type(item) == "rectangle"
+                and quote_canvas.itemcget(item, "fill") == background
+            ]
+            self.assertIn(float(expected_right), background_rights)
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+        nested_index = self.app.editor.search(">> d", "1.0", stopindex="end", elide=True)
+        self.assertIn("marker_hidden", self.app.editor.tag_names(nested_index))
+
+        self.app.editor.mark_set("insert", "7.1")
+        self.app._refresh_active_line(previous_line=9)
+
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+        self.assertNotIn("marker_hidden", self.app.editor.tag_names("7.0"))
+        self.assertIsNone(quote_record.widget)
+
     def test_view_menu_is_removed_and_table_shortcut_is_bound(self) -> None:
         menu = self.root.nametowidget(self.root.cget("menu"))
         labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
@@ -132,6 +242,86 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(self.root.bind("<Control-Shift-P>"))
         self.assertTrue(self.root.bind("<Control-Shift-O>"))
 
+    def test_enter_continues_and_ends_markdown_structures(self) -> None:
+        cases = (
+            ("- item", "end-1c", "- item\n- "),
+            ("1. item", "end-1c", "1. item\n2. "),
+            ("- [x] task", "end-1c", "- [x] task\n- [ ] "),
+            ("> quote", "end-1c", "> quote\n> "),
+            ("> - item", "end-1c", "> - item\n> - "),
+            ("  indented", "end-1c", "  indented\n  "),
+            ("```\n  - code", "end-1c", "```\n  - code\n  "),
+            ("- item\n- ", "end-1c", "- item\n"),
+            ("> quote\n> ", "end-1c", "> quote\n"),
+            ("> - item\n> - ", "end-1c", "> - item\n> "),
+            ("- suffix", "1.2", "- \n- suffix"),
+        )
+
+        for source, insert_index, expected in cases:
+            with self.subTest(source=source, insert_index=insert_index):
+                self.app._replace_text(source)
+                self.app.editor.mark_set("insert", insert_index)
+
+                result = self.app._on_return()
+
+                self.assertEqual(result, "break")
+                self.assertEqual(self.app.editor.get("1.0", "end-1c"), expected)
+
+    def test_tab_and_shift_enter_support_structured_typing(self) -> None:
+        self.app._replace_text("- item")
+        self.app.editor.mark_set("insert", "end-1c")
+
+        self.assertEqual(self.app._on_list_indent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "  - item")
+        self.assertEqual(self.app._on_list_outdent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "- item")
+
+        self.app._replace_text("> - item")
+        self.app.editor.mark_set("insert", "end-1c")
+        self.assertEqual(self.app._on_list_indent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), ">   - item")
+        self.assertEqual(self.app._on_list_outdent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "> - item")
+
+        self.app._replace_text("- item")
+        self.app.editor.mark_set("insert", "end-1c")
+        self.assertEqual(self.app._on_shift_return(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "- item\n")
+
+    def test_pair_completion_wraps_selection_and_skips_existing_closer(self) -> None:
+        self.app._replace_text("text ")
+        self.app.editor.mark_set("insert", "end-1c")
+
+        self.assertEqual(self.app._handle_pair_character("("), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "text ()")
+        self.assertEqual(self.app.editor.index("insert"), "1.6")
+        self.assertEqual(self.app._handle_pair_character(")"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "text ()")
+        self.assertEqual(self.app.editor.index("insert"), "1.7")
+
+        self.app._replace_text("code")
+        self.app.editor.tag_add("sel", "1.0", "1.4")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "`code`")
+        self.assertEqual(self.app.editor.get("sel.first", "sel.last"), "code")
+
+        self.app._replace_text("")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "``")
+        self.assertEqual(self.app.editor.index("insert"), "1.1")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "```\n```")
+        self.assertEqual(self.app.editor.index("insert"), "1.3")
+
+        self.app.editor.insert("insert", "python")
+        self.assertEqual(self.app._on_return(), "break")
+        self.assertEqual(
+            self.app.editor.get("1.0", "end-1c"),
+            "```python\n\n```",
+        )
+        self.assertEqual(self.app.editor.index("insert"), "2.0")
+
     def test_status_is_placed_between_title_and_marker_toggle(self) -> None:
         header = self.app.status_label.master
         title_label = next(
@@ -146,7 +336,15 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(int(title_label.grid_info()["column"]), 0)
         self.assertEqual(int(self.app.status_label.grid_info()["column"]), 1)
         self.assertEqual(int(marker_toggle.grid_info()["column"]), 2)
-        self.assertNotEqual(self.app.status_text.get(), "")
+        self.assertIn("新規", self.app.status_text.get())
+        self.assertNotIn("無題.md", self.app.status_text.get())
+
+        self.app.current_path = Path("saved-memo.md")
+        self.app._update_title_and_status()
+
+        self.assertIn("保存済み", self.app.status_text.get())
+        self.assertNotIn("saved-memo.md", self.app.status_text.get())
+        self.assertIn("saved-memo.md", self.root.title())
 
     def test_pdf_export_saves_markdown_before_writing_pdf(self) -> None:
         self.app._replace_text("# PDF")
@@ -386,6 +584,74 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(len(heights), 2)
         self.assertGreater(heights[1], heights[0])
+
+    def test_active_heading_math_source_uses_heading_size(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.app._activate_decoration_line(math_record.widget)
+        math_index = self.app.editor.search("x^2", "1.0")
+
+        font_tag = "script_font_latin_math_heading1"
+        font_name = self.app.editor.tag_cget(font_tag, "font")
+        source_font = tkfont.Font(root=self.root, font=font_name)
+
+        self.assertIn(font_tag, self.app.editor.tag_names(math_index))
+        self.assertEqual(source_font.actual("size"), HEADING_MATH_FONT_SIZES[0])
+        self.assertLess(source_font.actual("size"), HEADING_FONT_SIZES[0])
+
+    def test_single_heading_line_shows_math_preview_and_click_restores_source(self) -> None:
+        markdown = "# 見出し $x^2$"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+
+        math_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "math"
+        )
+        self.assertIsNotNone(math_record.widget)
+        self.assertTrue(hasattr(math_record.widget, "image"))
+
+        self.app._activate_decoration_line(math_record.widget)
+
+        self.assertIsNone(math_record.widget)
+        math_index = self.app.editor.search("x^2", "1.0")
+        self.assertIn("math_inline", self.app.editor.tag_names(math_index))
+
+    def test_heading_leading_math_preview_is_not_hidden_with_heading_marker(self) -> None:
+        cases = (
+            "# $P=NP$",
+            "# $P=NP$問題",
+            "# 問題$P=NP$",
+        )
+        for heading in cases:
+            with self.subTest(heading=heading):
+                self.app._replace_text(f"{heading}\n\nカーソル")
+                self.app.editor.mark_set("insert", "end-1c")
+                self.app.render_markdown()
+                self.root.update_idletasks()
+
+                math_record = next(
+                    record
+                    for record in self.app._decoration_records
+                    if record.decoration_type == "math"
+                )
+                self.assertIsNotNone(math_record.widget)
+                for cursor_index in ("1.0 lineend", "end-1c"):
+                    self.app.editor.mark_set("insert", cursor_index)
+                    self.app._on_cursor_moved()
+                    window_index = self.app.editor.index(str(math_record.widget))
+                    window_tags = self.app.editor.tag_names(window_index)
+
+                    self.assertNotIn("marker_hidden", window_tags)
+                    self.assertNotIn("marker_concealable", window_tags)
 
     def test_structured_display_math_and_table_cell_math_render(self) -> None:
         markdown = (
