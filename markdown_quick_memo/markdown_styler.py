@@ -56,6 +56,21 @@ class QuoteMarker:
 
 
 @dataclass(frozen=True, slots=True)
+class QuoteLine:
+    start: int
+    end: int
+    content: str
+    depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class QuoteBlock:
+    start: int
+    end: int
+    lines: tuple[QuoteLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MathExpression:
     start: int
     end: int
@@ -72,6 +87,7 @@ class MarkdownAnalysis:
     tables: list[TableBlock] = field(default_factory=list)
     list_markers: list[ListMarker] = field(default_factory=list)
     quote_markers: list[QuoteMarker] = field(default_factory=list)
+    quote_blocks: list[QuoteBlock] = field(default_factory=list)
     math_expressions: list[MathExpression] = field(default_factory=list)
 
 
@@ -313,10 +329,24 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
     previous_was_list = False
     current_quote_depth = 0
     quote_paragraph_open = False
+    current_quote_lines: list[QuoteLine] = []
+
+    def flush_quote_block() -> None:
+        if not current_quote_lines:
+            return
+        analysis.quote_blocks.append(
+            QuoteBlock(
+                current_quote_lines[0].start,
+                current_quote_lines[-1].end,
+                tuple(current_quote_lines),
+            )
+        )
+        current_quote_lines.clear()
 
     for line_index, (line_start, line) in enumerate(line_records):
         line_end = line_start + len(line)
         if _overlaps(line_start, line_end, protected_ranges):
+            flush_quote_block()
             previous_was_list = False
             current_quote_depth = 0
             quote_paragraph_open = False
@@ -324,18 +354,36 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
 
         quote = QUOTE_LINE_PATTERN.match(line)
         if quote:
-            current_quote_depth = quote.group(2).count(">")
+            explicit_quote_depth = quote.group(2).count(">")
             quote_content = quote.group(3)
-            quote_paragraph_open = bool(
+            content_continues_paragraph = bool(
                 quote_content.strip()
                 and not QUOTE_INTERRUPT_PATTERN.match(quote_content)
             )
+            if (
+                explicit_quote_depth < current_quote_depth
+                and quote_paragraph_open
+                and content_continues_paragraph
+            ):
+                effective_quote_depth = current_quote_depth
+            else:
+                effective_quote_depth = explicit_quote_depth
+            current_quote_depth = effective_quote_depth
+            quote_paragraph_open = content_continues_paragraph
             marker_end = line_start + quote.start(3)
             style_end = min(line_end + 1, len(text))
             analysis.spans.append(StyleSpan(line_start, style_end, "quote"))
             analysis.spans.append(StyleSpan(line_start, marker_end, "quote_marker", True))
             analysis.quote_markers.append(
                 QuoteMarker(line_start, marker_end, current_quote_depth)
+            )
+            current_quote_lines.append(
+                QuoteLine(
+                    line_start,
+                    line_end,
+                    quote_content,
+                    current_quote_depth,
+                )
             )
         elif (
             current_quote_depth
@@ -348,7 +396,11 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             analysis.quote_markers.append(
                 QuoteMarker(line_start, line_start, current_quote_depth)
             )
+            current_quote_lines.append(
+                QuoteLine(line_start, line_end, line, current_quote_depth)
+            )
         else:
+            flush_quote_block()
             current_quote_depth = 0
             quote_paragraph_open = False
 
@@ -418,6 +470,8 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             analysis.spans.append(StyleSpan(line_start, line_end, "horizontal_rule"))
             analysis.spans.append(StyleSpan(line_start, line_end, "marker", True))
             analysis.horizontal_rules.append(HorizontalRule(line_start, line_end))
+
+    flush_quote_block()
 
     image_ranges: list[tuple[int, int]] = []
     for match in IMAGE_PATTERN.finditer(text):

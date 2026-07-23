@@ -26,7 +26,8 @@ from .markdown_styler import (
     ListMarker,
     MarkdownAnalysis,
     MathExpression,
-    QuoteMarker,
+    QuoteBlock,
+    QuoteLine,
     TableBlock,
     analyze_markdown,
 )
@@ -45,9 +46,12 @@ TABLE_LINE_COLOR = "#94a3b8"
 TABLE_LINE_WIDTH = 1
 TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
 QUOTE_BACKGROUND = "#f3f4f6"
+QUOTE_BACKGROUNDS = (QUOTE_BACKGROUND, "#e5e7eb", "#d1d5db")
 QUOTE_BAR_COLOR = "#60a5fa"
 QUOTE_BAR_WIDTH = 3
-QUOTE_BAR_GAP = 6
+QUOTE_INDENT = 18
+QUOTE_TEXT_PADDING = 12
+QUOTE_LINE_VERTICAL_PADDING = 3
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 HEADING_MATH_FONT_SCALE = 0.9
 HEADING_MATH_FONT_SIZES = tuple(
@@ -778,8 +782,8 @@ class MarkdownQuickMemoApp:
             decorations.append((table.start, table.end, "table", table))
         for marker in self._analysis.list_markers:
             decorations.append((marker.start, marker.end, "list_marker", marker))
-        for marker in self._analysis.quote_markers:
-            decorations.append((marker.start, marker.end, "quote_marker", marker))
+        for block in self._analysis.quote_blocks:
+            decorations.append((block.start, block.end, "quote_block", block))
         for expression in self._analysis.math_expressions:
             if any(table.start <= expression.start and expression.end <= table.end for table in self._analysis.tables):
                 continue
@@ -795,12 +799,12 @@ class MarkdownQuickMemoApp:
     ) -> bool:
         if record.decoration_type == "rule":
             return not record.start <= insert_offset <= record.end
+        if record.decoration_type == "quote_block":
+            return not record.start <= insert_offset <= record.end
         if record.decoration_type == "table":
             return not record.start <= insert_offset < record.end
         if record.decoration_type == "math":
             return not record.start <= insert_offset < record.end
-        if record.decoration_type == "quote_marker" and record.start == record.end:
-            return not active_line_start <= record.start < active_line_end
         return record.end <= active_line_start or record.start >= active_line_end
 
     def _create_decoration_widget(self, record: _DecorationRecord) -> tk.Widget:
@@ -810,8 +814,8 @@ class MarkdownQuickMemoApp:
             return self._create_table_widget(record.decoration)  # type: ignore[arg-type]
         if record.decoration_type == "list_marker":
             return self._create_list_marker_widget(record.decoration)  # type: ignore[arg-type]
-        if record.decoration_type == "quote_marker":
-            return self._create_quote_marker_widget(record.decoration)  # type: ignore[arg-type]
+        if record.decoration_type == "quote_block":
+            return self._create_quote_block_widget(record.decoration)  # type: ignore[arg-type]
         return self._create_math_widget(record.decoration)  # type: ignore[arg-type]
 
     def _mount_decoration(self, record: _DecorationRecord) -> None:
@@ -912,25 +916,123 @@ class MarkdownQuickMemoApp:
             pady=0,
         )
 
-    def _create_quote_marker_widget(self, marker: QuoteMarker) -> tk.Canvas:
-        marker_width = marker.depth * (QUOTE_BAR_WIDTH + QUOTE_BAR_GAP) + 3
+    @staticmethod
+    def _wrap_quote_text(
+        text: str,
+        font: tkfont.Font,
+        maximum_width: int,
+    ) -> list[str]:
+        if not text:
+            return [""]
+        wrapped_lines: list[str] = []
+        current_line = ""
+        for character in text:
+            candidate = current_line + character
+            if current_line and font.measure(candidate) > maximum_width:
+                wrapped_lines.append(current_line)
+                current_line = character
+            else:
+                current_line = candidate
+        wrapped_lines.append(current_line)
+        return wrapped_lines
+
+    def _create_quote_block_widget(self, block: QuoteBlock) -> tk.Canvas:
+        available_width = self._decoration_width()
+        latin_font = tkfont.Font(family=self._latin_font_family, size=11)
+        japanese_font = tkfont.Font(family=self._japanese_font_family, size=11)
+        line_spacing = max(
+            latin_font.metrics("linespace"),
+            japanese_font.metrics("linespace"),
+        )
+
+        rendered_lines: list[tuple[QuoteLine, tkfont.Font, list[str], int]] = []
+        total_height = 0
+        for line in block.lines:
+            line_font = (
+                japanese_font
+                if any(is_japanese_character(character) for character in line.content)
+                else latin_font
+            )
+            text_start = (line.depth - 1) * QUOTE_INDENT + QUOTE_TEXT_PADDING
+            maximum_width = max(
+                40,
+                available_width - text_start - 8,
+            )
+            wrapped_text = self._wrap_quote_text(
+                line.content,
+                line_font,
+                maximum_width,
+            )
+            line_height = (
+                len(wrapped_text) * line_spacing
+                + QUOTE_LINE_VERTICAL_PADDING * 2
+            )
+            rendered_lines.append((line, line_font, wrapped_text, line_height))
+            total_height += line_height
+
         canvas = tk.Canvas(
             self.editor,
-            width=marker_width,
-            height=18,
-            background=QUOTE_BACKGROUND,
+            width=available_width,
+            height=total_height,
+            background="#ffffff",
             borderwidth=0,
             highlightthickness=0,
         )
-        for depth in range(marker.depth):
-            x_position = 2 + depth * (QUOTE_BAR_WIDTH + QUOTE_BAR_GAP)
-            canvas.create_rectangle(
-                x_position,
-                0,
-                x_position + QUOTE_BAR_WIDTH,
-                18,
-                fill=QUOTE_BAR_COLOR,
-                outline="",
+        canvas.quote_fonts = (latin_font, japanese_font)  # type: ignore[attr-defined]
+
+        line_tops: list[int] = []
+        current_top = 0
+        for _, _, _, line_height in rendered_lines:
+            line_tops.append(current_top)
+            current_top += line_height
+
+        maximum_depth = max(line.depth for line in block.lines)
+        for depth in range(1, maximum_depth + 1):
+            run_start: int | None = None
+            for line_index, line in enumerate(block.lines):
+                if line.depth >= depth and run_start is None:
+                    run_start = line_index
+                run_ends = line.depth < depth or line_index == len(block.lines) - 1
+                if run_start is None or not run_ends:
+                    continue
+                run_end = (
+                    line_index - 1
+                    if line.depth < depth
+                    else line_index
+                )
+                x_position = (depth - 1) * QUOTE_INDENT
+                run_top = line_tops[run_start]
+                run_bottom = line_tops[run_end] + rendered_lines[run_end][3]
+                background = QUOTE_BACKGROUNDS[
+                    min(depth - 1, len(QUOTE_BACKGROUNDS) - 1)
+                ]
+                canvas.create_rectangle(
+                    x_position,
+                    run_top,
+                    available_width - x_position,
+                    run_bottom,
+                    fill=background,
+                    outline="",
+                )
+                canvas.create_rectangle(
+                    x_position,
+                    run_top,
+                    x_position + QUOTE_BAR_WIDTH,
+                    run_bottom,
+                    fill=QUOTE_BAR_COLOR,
+                    outline="",
+                )
+                run_start = None
+
+        for line_index, (line, line_font, wrapped_text, _) in enumerate(rendered_lines):
+            text_start = (line.depth - 1) * QUOTE_INDENT + QUOTE_TEXT_PADDING
+            canvas.create_text(
+                text_start,
+                line_tops[line_index] + QUOTE_LINE_VERTICAL_PADDING,
+                anchor="nw",
+                text="\n".join(wrapped_text),
+                fill="#4b5563",
+                font=line_font,
             )
         return canvas
 

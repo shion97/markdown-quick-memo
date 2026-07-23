@@ -900,8 +900,6 @@ class _PdfFlowableRenderer:
         }
         if not display_tokens:
             markup = self._inline_markup(node)
-            if style_name == "quote":
-                markup = markup.replace("<br/>", " ")
             return [self._paragraph(markup or "&#160;", style_name, quote_depth=quote_depth)]
 
         token_pattern = re.compile(
@@ -942,8 +940,6 @@ class _PdfFlowableRenderer:
                 continue
             temporary_node = _HtmlNode("span", children=segment)
             markup = self._inline_markup(temporary_node)
-            if style_name == "quote":
-                markup = markup.replace("<br/>", " ")
             if markup.strip():
                 flowables.append(
                     self._paragraph(markup, style_name, quote_depth=quote_depth)

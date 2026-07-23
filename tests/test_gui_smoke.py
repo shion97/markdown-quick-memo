@@ -157,16 +157,16 @@ class GuiSmokeTests(unittest.TestCase):
         quote_records = [
             record
             for record in self.app._decoration_records
-            if record.decoration_type == "quote_marker"
+            if record.decoration_type == "quote_block"
         ]
 
+        self.assertEqual(len(quote_records), 1)
+        quote_record = quote_records[0]
         self.assertEqual(
-            [record.decoration.depth for record in quote_records],
-            [1, 1, 2, 1, 3, 3],
+            [line.depth for line in quote_record.decoration.lines],
+            [1, 1, 2, 2, 3, 3],
         )
-        self.assertTrue(
-            all(isinstance(record.widget, tk.Canvas) for record in quote_records)
-        )
+        self.assertIsInstance(quote_record.widget, tk.Canvas)
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         nested_index = self.app.editor.search(">> d", "1.0", stopindex="end", elide=True)
         self.assertIn("marker_hidden", self.app.editor.tag_names(nested_index))
@@ -176,8 +176,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         self.assertNotIn("marker_hidden", self.app.editor.tag_names("7.0"))
-        lazy_record = quote_records[-1]
-        self.assertIsNone(lazy_record.widget)
+        self.assertIsNone(quote_record.widget)
 
     def test_view_menu_is_removed_and_table_shortcut_is_bound(self) -> None:
         menu = self.root.nametowidget(self.root.cget("menu"))

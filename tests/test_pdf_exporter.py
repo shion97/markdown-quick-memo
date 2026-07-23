@@ -37,6 +37,37 @@ class PdfExporterTests(unittest.TestCase):
         self.assertIn("<p>d<br>\ne</p>", rendered_html)
         self.assertIn("<p>f<br>\ng</p>", rendered_html)
 
+        root = _parse_html(rendered_html)
+        renderer = _PdfFlowableRenderer(
+            fonts=_PdfFonts(
+                "Helvetica",
+                "Helvetica-Bold",
+                "Helvetica-Oblique",
+                "Helvetica-BoldOblique",
+                "Helvetica",
+                "Helvetica-Bold",
+                "Courier",
+            ),
+            math_assets={},
+            list_assets={},
+            markdown_directory=Path("."),
+            available_width=400,
+        )
+        quote_node = next(
+            child for child in root.children if getattr(child, "tag", "") == "blockquote"
+        )
+        paragraph_node = next(
+            child
+            for child in quote_node.children
+            if getattr(child, "tag", "") == "p"
+        )
+        paragraph = renderer._paragraph_flowables(
+            paragraph_node,
+            style_name="quote",
+            quote_depth=1,
+        )[0]
+        self.assertIn("<br/>", paragraph.text)
+
         strict_html = _markdown_to_html("> valid\n\n>invalid")
         self.assertEqual(strict_html.count("<blockquote>"), 1)
         self.assertIn("<p>&gt;invalid</p>", strict_html)

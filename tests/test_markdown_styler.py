@@ -53,7 +53,7 @@ class MarkdownStylerTests(unittest.TestCase):
 
         self.assertEqual(
             [marker.depth for marker in analysis.quote_markers],
-            [1, 1, 2, 1, 3, 3, 2],
+            [1, 1, 2, 2, 3, 3, 2],
         )
         self.assertEqual(
             [text[marker.start : marker.end] for marker in analysis.quote_markers],
@@ -64,6 +64,15 @@ class MarkdownStylerTests(unittest.TestCase):
         invalid_offset = text.index(">invalid")
         self.assertTrue(any(span.start <= lazy_offset < span.end for span in quote_spans))
         self.assertFalse(any(span.start <= invalid_offset < span.end for span in quote_spans))
+        self.assertEqual(len(analysis.quote_blocks), 2)
+        self.assertEqual(
+            [line.depth for line in analysis.quote_blocks[0].lines],
+            [1, 1, 2, 2, 3, 3],
+        )
+        self.assertEqual(
+            [line.content for line in analysis.quote_blocks[0].lines],
+            ["b", "c", "d", "e", "f", "g"],
+        )
 
         paragraph_break = analyze_markdown("> paragraph\n> \noutside")
         outside_offset = len("> paragraph\n> \n")
@@ -75,6 +84,11 @@ class MarkdownStylerTests(unittest.TestCase):
                 span.start <= outside_offset < span.end
                 for span in paragraph_quote_spans
             )
+        )
+        self.assertEqual(len(paragraph_break.quote_blocks), 1)
+        self.assertEqual(
+            [line.content for line in paragraph_break.quote_blocks[0].lines],
+            ["paragraph", ""],
         )
 
     def test_ordered_and_mixed_nested_lists_get_preview_markers(self) -> None:
