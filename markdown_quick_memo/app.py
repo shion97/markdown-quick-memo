@@ -52,6 +52,8 @@ QUOTE_BAR_WIDTH = 3
 QUOTE_INDENT = 18
 QUOTE_TEXT_PADDING = 12
 QUOTE_LINE_VERTICAL_PADDING = 3
+QUOTE_WRAP_EXTENSION_CHARS = (5, 2, 1)
+QUOTE_BACKGROUND_TRAILING_CHARS = 1
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 HEADING_MATH_FONT_SCALE = 0.9
 HEADING_MATH_FONT_SIZES = tuple(
@@ -937,13 +939,31 @@ class MarkdownQuickMemoApp:
         return wrapped_lines
 
     def _create_quote_block_widget(self, block: QuoteBlock) -> tk.Canvas:
-        available_width = self._decoration_width()
+        base_width = self._decoration_width()
         latin_font = tkfont.Font(family=self._latin_font_family, size=11)
         japanese_font = tkfont.Font(family=self._japanese_font_family, size=11)
+        half_width_character = latin_font.measure("0")
         line_spacing = max(
             latin_font.metrics("linespace"),
             japanese_font.metrics("linespace"),
         )
+
+        maximum_depth = max(line.depth for line in block.lines)
+        wrap_right_by_depth: dict[int, int] = {}
+        for depth in range(1, maximum_depth + 1):
+            text_start = (depth - 1) * QUOTE_INDENT + QUOTE_TEXT_PADDING
+            extension_index = min(
+                depth - 1,
+                len(QUOTE_WRAP_EXTENSION_CHARS) - 1,
+            )
+            wrap_extension = (
+                QUOTE_WRAP_EXTENSION_CHARS[extension_index]
+                * half_width_character
+            )
+            wrap_right_by_depth[depth] = text_start + max(
+                40,
+                base_width - text_start - 8 + wrap_extension,
+            )
 
         rendered_lines: list[tuple[QuoteLine, tkfont.Font, list[str], int]] = []
         total_height = 0
@@ -954,10 +974,7 @@ class MarkdownQuickMemoApp:
                 else latin_font
             )
             text_start = (line.depth - 1) * QUOTE_INDENT + QUOTE_TEXT_PADDING
-            maximum_width = max(
-                40,
-                available_width - text_start - 8,
-            )
+            maximum_width = wrap_right_by_depth[line.depth] - text_start
             wrapped_text = self._wrap_quote_text(
                 line.content,
                 line_font,
@@ -970,9 +987,15 @@ class MarkdownQuickMemoApp:
             rendered_lines.append((line, line_font, wrapped_text, line_height))
             total_height += line_height
 
+        background_right_by_depth = {
+            depth: wrap_right
+            + QUOTE_BACKGROUND_TRAILING_CHARS * half_width_character
+            for depth, wrap_right in wrap_right_by_depth.items()
+        }
+        canvas_width = max(base_width, *background_right_by_depth.values())
         canvas = tk.Canvas(
             self.editor,
-            width=available_width,
+            width=canvas_width,
             height=total_height,
             background="#ffffff",
             borderwidth=0,
@@ -986,7 +1009,6 @@ class MarkdownQuickMemoApp:
             line_tops.append(current_top)
             current_top += line_height
 
-        maximum_depth = max(line.depth for line in block.lines)
         for depth in range(1, maximum_depth + 1):
             run_start: int | None = None
             for line_index, line in enumerate(block.lines):
@@ -1009,7 +1031,7 @@ class MarkdownQuickMemoApp:
                 canvas.create_rectangle(
                     x_position,
                     run_top,
-                    available_width - x_position,
+                    background_right_by_depth[depth],
                     run_bottom,
                     fill=background,
                     outline="",

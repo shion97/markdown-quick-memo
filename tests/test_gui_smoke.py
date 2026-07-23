@@ -18,6 +18,9 @@ from markdown_quick_memo.app import (
     INLINE_MATH_RENDER_DPI,
     INLINE_MATH_TOP_PADDING,
     MarkdownQuickMemoApp,
+    QUOTE_BACKGROUNDS,
+    QUOTE_BACKGROUND_TRAILING_CHARS,
+    QUOTE_WRAP_EXTENSION_CHARS,
     TABLE_LINE_COLOR,
     TABLE_LINE_WIDTH,
     TABLE_STRONG_LINE_WIDTH,
@@ -167,6 +170,29 @@ class GuiSmokeTests(unittest.TestCase):
             [1, 1, 2, 2, 3, 3],
         )
         self.assertIsInstance(quote_record.widget, tk.Canvas)
+        quote_canvas = quote_record.widget
+        half_width_character = tkfont.Font(
+            family=self.app._latin_font_family,
+            size=11,
+        ).measure("0")
+        base_width = self.app._decoration_width()
+        for depth, background in enumerate(QUOTE_BACKGROUNDS, start=1):
+            expected_right = (
+                base_width
+                - 8
+                + (
+                    QUOTE_WRAP_EXTENSION_CHARS[depth - 1]
+                    + QUOTE_BACKGROUND_TRAILING_CHARS
+                )
+                * half_width_character
+            )
+            background_rights = [
+                quote_canvas.coords(item)[2]
+                for item in quote_canvas.find_all()
+                if quote_canvas.type(item) == "rectangle"
+                and quote_canvas.itemcget(item, "fill") == background
+            ]
+            self.assertIn(float(expected_right), background_rights)
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         nested_index = self.app.editor.search(">> d", "1.0", stopindex="end", elide=True)
         self.assertIn("marker_hidden", self.app.editor.tag_names(nested_index))
