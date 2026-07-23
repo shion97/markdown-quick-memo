@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
 import os
@@ -32,7 +34,7 @@ from .markdown_styler import (
     TableBlock,
     analyze_markdown,
 )
-from .math_renderer import preload_math_renderer, render_math_png
+from .math_renderer import is_math_renderer_preloaded, preload_math_renderer, render_math_png
 
 
 APP_NAME = "Markdown Quick Memo"
@@ -69,6 +71,7 @@ INLINE_MATH_TOP_PADDING = 4
 DISPLAY_MATH_VERTICAL_PADDING_POINTS = 2.0
 MATH_PRELOAD_DELAY_MS = 100
 SCRIPT_FONT_TAG_DELAY_MS = 25
+TAG_RANGE_BATCH_SIZE = 400
 MAX_TABLE_DIMENSION = 100
 OPAQUE_WINDOW_ALPHA = 1.0
 TRANSLUCENT_WINDOW_ALPHA = 0.6
@@ -112,9 +115,30 @@ class _DecorationRecord:
     widget: tk.Widget | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _TextIndexMapper:
+    line_starts: tuple[int, ...]
+
+    @classmethod
+    def from_text(cls, text: str) -> _TextIndexMapper:
+        return cls((0, *(offset + 1 for offset, character in enumerate(text) if character == "\n")))
+
+    def index(self, offset: int) -> str:
+        line_index = bisect_right(self.line_starts, offset) - 1
+        column = offset - self.line_starts[line_index]
+        return f"{line_index + 1}.{column}"
+
+
 class MarkdownQuickMemoApp:
-    def __init__(self, root: tk.Tk, initial_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        initial_path: Path | None = None,
+        *,
+        resident: bool = False,
+    ) -> None:
         self.root = root
+        self._resident = resident
         register_bundled_fonts()
         self._latin_font_family = LATIN_FONT_FAMILY
         self._japanese_font_family = JAPANESE_FONT_FAMILY
@@ -127,8 +151,8 @@ class MarkdownQuickMemoApp:
         self._scroll_redraw_job: str | None = None
         self._last_cursor_line = 1
         self._analysis = MarkdownAnalysis()
+        self._text_index_mapper = _TextIndexMapper.from_text("")
         self._analysis_stale = False
-        self._dynamic_link_tags: list[str] = []
         self._decoration_widgets: list[tk.Widget] = []
         self._decoration_records: list[_DecorationRecord] = []
         self._rendering = False
@@ -157,7 +181,10 @@ class MarkdownQuickMemoApp:
             self.open_path(initial_path)
         self.editor.focus_set()
         self._schedule_script_font_tag_configuration()
-        self._schedule_math_preload()
+        if self._resident:
+            self.root.bind("<Map>", self._on_window_mapped, add="+")
+        else:
+            self._schedule_math_preload()
 
     def _schedule_script_font_tag_configuration(self) -> None:
         if self._script_font_tags_ready or self._script_font_tag_job is not None:
@@ -172,7 +199,20 @@ class MarkdownQuickMemoApp:
         self._ensure_script_font_tags()
 
     def _schedule_math_preload(self) -> None:
+        if (
+            is_math_renderer_preloaded()
+            or self._math_preload_job is not None
+            or (
+                self._math_preload_thread is not None
+                and self._math_preload_thread.is_alive()
+            )
+        ):
+            return
         self._math_preload_job = self.root.after(MATH_PRELOAD_DELAY_MS, self._start_math_preload)
+
+    def _on_window_mapped(self, event: tk.Event) -> None:
+        if event.widget is self.root:
+            self._schedule_math_preload()
 
     def _start_math_preload(self) -> None:
         self._math_preload_job = None
@@ -207,7 +247,10 @@ class MarkdownQuickMemoApp:
         self.root.minsize(480, 360)
         self.root.attributes("-alpha", OPAQUE_WINDOW_ALPHA)
         self.root.option_add("*tearOff", False)
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.protocol(
+            "WM_DELETE_WINDOW",
+            self.hide_window if self._resident else self.close,
+        )
 
     def _configure_named_fonts(self) -> None:
         for font_name in ("TkDefaultFont", "TkMenuFont", "TkCaptionFont", "TkSmallCaptionFont"):
@@ -404,6 +447,19 @@ class MarkdownQuickMemoApp:
         )
         self.editor.tag_configure("link", foreground=colors["accent"], underline=True)
         self.editor.tag_configure("image_reference", foreground="#7c3aed", underline=True)
+        self.editor.tag_configure("link_clickable", foreground=colors["accent"], underline=True)
+        self.editor.tag_configure("image_clickable", foreground="#7c3aed", underline=True)
+        for tag in ("link_clickable", "image_clickable"):
+            self.editor.tag_bind(
+                tag,
+                "<Enter>",
+                lambda event: self.editor.configure(cursor="hand2"),
+            )
+            self.editor.tag_bind(
+                tag,
+                "<Leave>",
+                lambda event: self.editor.configure(cursor="xterm"),
+            )
         self.editor.tag_configure("marker", foreground="#9ca3af")
         self.editor.tag_configure("marker_hidden", elide=True)
         self.editor.tag_configure("current_line", background="#f8fafc")
@@ -484,8 +540,27 @@ class MarkdownQuickMemoApp:
         if not text:
             return
         self._ensure_script_font_tags()
+        ranges_by_tag: dict[str, list[str]] = defaultdict(list)
         for run in build_font_runs(text, self._analysis.spans):
-            self.editor.tag_add(run.tag, f"1.0 + {run.start}c", f"1.0 + {run.end}c")
+            ranges_by_tag[run.tag].extend(
+                (
+                    self._text_index_mapper.index(run.start),
+                    self._text_index_mapper.index(run.end),
+                )
+            )
+        for tag, ranges in ranges_by_tag.items():
+            self._tag_add_ranges(tag, ranges)
+
+    def _tag_add_ranges(self, tag: str, ranges: list[str]) -> None:
+        if not ranges:
+            return
+        range_arguments_per_batch = TAG_RANGE_BATCH_SIZE * 2
+        for start in range(0, len(ranges), range_arguments_per_batch):
+            self.editor.tag_add(tag, *ranges[start : start + range_arguments_per_batch])
+
+    def _character_offset(self, index: str) -> int:
+        count = self.editor.count("1.0", index, "chars")
+        return int(count[0]) if count else 0
 
     def _bind_shortcuts(self) -> None:
         bindings = {
@@ -817,13 +892,13 @@ class MarkdownQuickMemoApp:
         else:
             if not self._analysis_stale:
                 insert_index = self.editor.index("insert")
-                insert_offset = len(self.editor.get("1.0", insert_index))
+                insert_offset = self._character_offset(insert_index)
                 active_line_start = self.editor.index(f"{insert_index} linestart")
                 active_line_end = self.editor.index(f"{insert_index} lineend +1c")
                 self._sync_block_decorations(
                     insert_offset,
-                    len(self.editor.get("1.0", active_line_start)),
-                    len(self.editor.get("1.0", active_line_end)),
+                    self._character_offset(active_line_start),
+                    self._character_offset(active_line_end),
                 )
             self._highlight_current_line()
             self._update_title_and_status()
@@ -851,56 +926,70 @@ class MarkdownQuickMemoApp:
         self._rendering = True
         self._render_job = None
         try:
-            insert_offset = len(self.editor.get("1.0", "insert"))
+            insert_offset = self._character_offset("insert")
             selection_offsets = self._selection_offsets()
             yview = self.editor.yview()
             self._clear_decorations()
 
             text = self.editor.get("1.0", "end-1c")
+            self._text_index_mapper = _TextIndexMapper.from_text(text)
             self._analysis = analyze_markdown(text)
             self._analysis_stale = False
             self._set_document_statistics(text)
-            insert_index = f"1.0 + {insert_offset}c"
+            insert_index = self._text_index_mapper.index(insert_offset)
 
             for tag in self.editor.tag_names():
                 if tag not in {"sel", "search_match", "search_current"}:
                     self.editor.tag_remove(tag, "1.0", "end")
-            for tag in self._dynamic_link_tags:
-                self.editor.tag_delete(tag)
-            self._dynamic_link_tags.clear()
 
             active_line_start = self.editor.index(f"{insert_index} linestart")
             active_line_end = self.editor.index(f"{insert_index} lineend +1c")
-            active_line_start_offset = len(self.editor.get("1.0", active_line_start))
-            active_line_end_offset = len(self.editor.get("1.0", active_line_end))
+            active_line_start_offset = self._character_offset(active_line_start)
+            active_line_end_offset = self._character_offset(active_line_end)
+            tag_ranges: dict[str, list[str]] = defaultdict(list)
+            concealable_ranges: list[str] = []
+            hidden_ranges: list[str] = []
             for span in self._analysis.spans:
                 if span.start >= span.end:
                     continue
-                start = f"1.0 + {span.start}c"
-                end = f"1.0 + {span.end}c"
-                self.editor.tag_add(span.tag, start, end)
+                start = self._text_index_mapper.index(span.start)
+                end = self._text_index_mapper.index(span.end)
+                tag_ranges[span.tag].extend((start, end))
                 if span.concealable:
-                    self.editor.tag_add("marker_concealable", start, end)
-                if span.concealable and self.hide_markers.get():
-                    if self.editor.compare(end, "<=", active_line_start) or self.editor.compare(start, ">=", active_line_end):
-                        self.editor.tag_add("marker_hidden", start, end)
+                    concealable_ranges.extend((start, end))
+                    if self.hide_markers.get() and (
+                        span.end <= active_line_start_offset
+                        or span.start >= active_line_end_offset
+                    ):
+                        hidden_ranges.extend((start, end))
+
+            for tag, ranges in tag_ranges.items():
+                self._tag_add_ranges(tag, ranges)
+            self._tag_add_ranges("marker_concealable", concealable_ranges)
+            self._tag_add_ranges("marker_hidden", hidden_ranges)
 
             self._apply_script_fonts(text)
 
-            for number, link in enumerate(self._analysis.links):
-                tag = f"dynamic_link_{number}"
-                start = f"1.0 + {link.start}c"
-                end = f"1.0 + {link.end}c"
-                self.editor.tag_add(tag, start, end)
-                self.editor.tag_configure(tag, foreground="#7c3aed" if link.is_image else "#2563eb", underline=True)
-                self.editor.tag_bind(tag, "<Enter>", lambda event: self.editor.configure(cursor="hand2"))
-                self.editor.tag_bind(tag, "<Leave>", lambda event: self.editor.configure(cursor="xterm"))
-                self._dynamic_link_tags.append(tag)
+            clickable_link_ranges: dict[str, list[str]] = defaultdict(list)
+            for link in self._analysis.links:
+                tag = "image_clickable" if link.is_image else "link_clickable"
+                clickable_link_ranges[tag].extend(
+                    (
+                        self._text_index_mapper.index(link.start),
+                        self._text_index_mapper.index(link.end),
+                    )
+                )
+            for tag, ranges in clickable_link_ranges.items():
+                self._tag_add_ranges(tag, ranges)
 
             self.editor.mark_set("insert", insert_index)
             if selection_offsets:
                 start_offset, end_offset = selection_offsets
-                self.editor.tag_add("sel", f"1.0 + {start_offset}c", f"1.0 + {end_offset}c")
+                self.editor.tag_add(
+                    "sel",
+                    self._text_index_mapper.index(start_offset),
+                    self._text_index_mapper.index(end_offset),
+                )
             self._render_block_decorations(
                 insert_offset,
                 active_line_start_offset,
@@ -921,11 +1010,11 @@ class MarkdownQuickMemoApp:
         self._rendering = True
         try:
             yview = self.editor.yview()
-            insert_offset = len(self.editor.get("1.0", "insert"))
+            insert_offset = self._character_offset("insert")
             active_line_start_index = self.editor.index("insert linestart")
             active_line_end_index = self.editor.index("insert lineend +1c")
-            active_line_start = len(self.editor.get("1.0", active_line_start_index))
-            active_line_end = len(self.editor.get("1.0", active_line_end_index))
+            active_line_start = self._character_offset(active_line_start_index)
+            active_line_end = self._character_offset(active_line_end_index)
             self._sync_block_decorations(
                 insert_offset,
                 active_line_start,
@@ -980,8 +1069,8 @@ class MarkdownQuickMemoApp:
         if selection is None:
             return None
         return (
-            len(self.editor.get("1.0", selection[0])),
-            len(self.editor.get("1.0", selection[1])),
+            self._character_offset(selection[0]),
+            self._character_offset(selection[1]),
         )
 
     def _clear_decorations(self) -> None:
@@ -1019,9 +1108,9 @@ class MarkdownQuickMemoApp:
         for number, (start, end, decoration_type, decoration) in enumerate(decorations):
             start_mark = f"_decoration_start_{number}"
             end_mark = f"_decoration_end_{number}"
-            self.editor.mark_set(start_mark, f"1.0 + {start}c")
+            self.editor.mark_set(start_mark, self._text_index_mapper.index(start))
             self.editor.mark_gravity(start_mark, "right")
-            self.editor.mark_set(end_mark, f"1.0 + {end}c")
+            self.editor.mark_set(end_mark, self._text_index_mapper.index(end))
             self.editor.mark_gravity(end_mark, "left")
             self._decoration_records.append(
                 _DecorationRecord(
@@ -1603,7 +1692,9 @@ class MarkdownQuickMemoApp:
             self._scroll_redraw_job = None
 
     def _highlight_current_line(self) -> None:
-        self.editor.tag_remove("current_line", "1.0", "end")
+        current_ranges = self.editor.tag_ranges("current_line")
+        if current_ranges:
+            self.editor.tag_remove("current_line", *current_ranges)
         self.editor.tag_add("current_line", "insert linestart", "insert lineend +1c")
         self.editor.tag_lower("current_line")
 
@@ -1738,6 +1829,12 @@ class MarkdownQuickMemoApp:
         if self._confirm_discard():
             self._cancel_scheduled_jobs()
             self.root.destroy()
+        return self._break()
+
+    def hide_window(self, _event: tk.Event | None = None) -> str:
+        """Hide a resident window while preserving the current memo in memory."""
+
+        self.root.withdraw()
         return self._break()
 
     def _cancel_scheduled_jobs(self) -> None:
@@ -1927,7 +2024,7 @@ class MarkdownQuickMemoApp:
 
     def _on_control_click(self, event: tk.Event) -> str | None:
         index = self.editor.index(f"@{event.x},{event.y}")
-        offset = len(self.editor.get("1.0", index))
+        offset = self._character_offset(index)
         for reference in self._analysis.links:
             if reference.start <= offset <= reference.end:
                 self._open_reference(reference)
@@ -1978,8 +2075,6 @@ class MarkdownQuickMemoApp:
         name = self.current_path.name if self.current_path else "無題.md"
         marker = " *" if self.dirty else ""
         self.root.title(f"{name}{marker} — {APP_NAME}")
-        if self._document_statistics_dirty:
-            self._set_document_statistics(self.editor.get("1.0", "end-1c"))
         line, column = self.editor.index("insert").split(".")
         state = "未保存" if self.dirty else "保存済み"
         if self.current_path is None and not self.dirty:

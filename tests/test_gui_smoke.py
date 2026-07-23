@@ -73,6 +73,7 @@ class GuiSmokeTests(unittest.TestCase):
             )
         )
         self.assertFalse(self.app.dirty)
+
         image_widgets = []
         for widget in self.app._decoration_widgets:
             image_widgets.extend(child for child in [widget, *widget.winfo_children()] if hasattr(child, "image"))
@@ -99,6 +100,27 @@ class GuiSmokeTests(unittest.TestCase):
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
         self.assertEqual(len(self.app._decoration_widgets), 4)
+
+    def test_resident_window_can_hide_without_discarding_document(self) -> None:
+        resident_root = tk.Tk()
+        resident_root.withdraw()
+        resident_app: MarkdownQuickMemoApp | None = None
+        try:
+            resident_app = MarkdownQuickMemoApp(resident_root, resident=True)
+            resident_app.editor.insert("1.0", "待機中のメモ")
+
+            resident_app.hide_window()
+
+            self.assertEqual(resident_root.state(), "withdrawn")
+            self.assertIsNone(resident_app._math_preload_job)
+            self.assertEqual(
+                resident_app.editor.get("1.0", "end-1c"),
+                "待機中のメモ",
+            )
+        finally:
+            if resident_app is not None:
+                resident_app._cancel_scheduled_jobs()
+            resident_root.destroy()
 
     def test_editor_wraps_at_character_boundary_across_styles_and_spaces(self) -> None:
         self.root.minsize(480, 360)

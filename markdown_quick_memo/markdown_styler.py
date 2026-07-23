@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 import re
 
@@ -129,8 +131,31 @@ def _line_ranges(text: str):
         yield offset, ""
 
 
-def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
-    return any(start < range_end and end > range_start for range_start, range_end in ranges)
+@dataclass(frozen=True, slots=True)
+class _RangeIndex:
+    ranges: tuple[tuple[int, int], ...]
+    starts: tuple[int, ...]
+
+    @classmethod
+    def build(cls, ranges: Iterable[tuple[int, int]]) -> _RangeIndex:
+        merged: list[tuple[int, int]] = []
+        for range_start, range_end in sorted(ranges):
+            if range_start >= range_end:
+                continue
+            if merged and range_start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], range_end))
+            else:
+                merged.append((range_start, range_end))
+        normalized = tuple(merged)
+        return cls(normalized, tuple(range_start for range_start, _ in normalized))
+
+    def overlaps(self, start: int, end: int) -> bool:
+        candidate_count = bisect_left(self.starts, end)
+        return candidate_count > 0 and self.ranges[candidate_count - 1][1] > start
+
+
+def _overlaps(start: int, end: int, ranges: _RangeIndex) -> bool:
+    return ranges.overlaps(start, end)
 
 
 def _delimiter_spans(match: re.Match[str], tag: str) -> list[StyleSpan]:
@@ -241,16 +266,19 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             analysis.spans.append(StyleSpan(language_start, language_end, "code_language"))
         analysis.spans.append(StyleSpan(closing_start, end, "marker", True))
 
-    math_protected_ranges = [
-        *protected_ranges,
-        *(match.span(0) for match in INLINE_CODE_PATTERN.finditer(text)),
-        *(match.span(2) for match in IMAGE_PATTERN.finditer(text)),
-        *(match.span(2) for match in LINK_PATTERN.finditer(text)),
-    ]
+    protected_range_index = _RangeIndex.build(protected_ranges)
+    math_protected_range_index = _RangeIndex.build(
+        [
+            *protected_ranges,
+            *(match.span(0) for match in INLINE_CODE_PATTERN.finditer(text)),
+            *(match.span(2) for match in IMAGE_PATTERN.finditer(text)),
+            *(match.span(2) for match in LINK_PATTERN.finditer(text)),
+        ]
+    )
     math_ranges: list[tuple[int, int]] = []
     for math_match in DISPLAY_MATH_PATTERN.finditer(text):
         start, end = math_match.span(0)
-        if _overlaps(start, end, math_protected_ranges):
+        if _overlaps(start, end, math_protected_range_index):
             continue
         expression = math_match.group(1).strip()
         if not expression:
@@ -267,9 +295,12 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             ]
         )
 
+    inline_math_excluded_range_index = _RangeIndex.build(
+        [*math_protected_range_index.ranges, *math_ranges]
+    )
     for math_match in INLINE_MATH_PATTERN.finditer(text):
         start, end = math_match.span(0)
-        if _overlaps(start, end, math_protected_ranges + math_ranges):
+        if _overlaps(start, end, inline_math_excluded_range_index):
             continue
         expression = math_match.group(1)
         math_ranges.append((start, end))
@@ -292,7 +323,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
         if alignments is None or delimiter_index - 1 in table_line_indexes:
             continue
         delimiter_end = delimiter_start + len(delimiter_line)
-        if _overlaps(delimiter_start, delimiter_end, protected_ranges):
+        if _overlaps(delimiter_start, delimiter_end, protected_range_index):
             continue
         header_start, header_line = line_records[delimiter_index - 1]
         header_cells = _split_table_row(header_line)
@@ -308,7 +339,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             body_end = body_start + len(body_line)
             if not body_line.strip() or "|" not in body_line:
                 break
-            if _overlaps(body_start, body_end, protected_ranges):
+            if _overlaps(body_start, body_end, protected_range_index):
                 break
             rows.append(_normalize_table_row(_split_table_row(body_line), column_count))
             last_row_index = body_index
@@ -345,7 +376,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
 
     for line_index, (line_start, line) in enumerate(line_records):
         line_end = line_start + len(line)
-        if _overlaps(line_start, line_end, protected_ranges):
+        if _overlaps(line_start, line_end, protected_range_index):
             flush_quote_block()
             previous_was_list = False
             current_quote_depth = 0
@@ -476,7 +507,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
     image_ranges: list[tuple[int, int]] = []
     for match in IMAGE_PATTERN.finditer(text):
         start, end = match.span(0)
-        if _overlaps(start, end, protected_ranges):
+        if _overlaps(start, end, protected_range_index):
             continue
         image_ranges.append((start, end))
         analysis.spans.append(StyleSpan(start, end, "image_reference"))
@@ -485,7 +516,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
     link_ranges: list[tuple[int, int]] = []
     for match in LINK_PATTERN.finditer(text):
         start, end = match.span(0)
-        if _overlaps(start, end, protected_ranges):
+        if _overlaps(start, end, protected_range_index):
             continue
         link_ranges.append((start, end))
         analysis.spans.append(StyleSpan(match.start(1), match.end(1), "link"))
@@ -493,17 +524,19 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
         analysis.spans.append(StyleSpan(match.end(1), end, "marker", True))
         analysis.links.append(LinkReference(start, end, match.group(2), False))
 
-    excluded_ranges = protected_ranges + math_ranges + image_ranges + link_ranges
+    excluded_range_index = _RangeIndex.build(
+        [*protected_ranges, *math_ranges, *image_ranges, *link_ranges]
+    )
     for pattern, tag in INLINE_PATTERNS:
         for match in pattern.finditer(text):
             start, end = match.span(0)
-            if _overlaps(start, end, excluded_ranges):
+            if _overlaps(start, end, excluded_range_index):
                 continue
             analysis.spans.extend(_delimiter_spans(match, tag))
 
     escaped = re.compile(r"\\([\\`*{}\[\]()#+\-.!_>~|])")
     for match in escaped.finditer(text):
-        if not _overlaps(match.start(), match.end(), protected_ranges):
+        if not _overlaps(match.start(), match.end(), protected_range_index):
             analysis.spans.append(StyleSpan(match.start(), match.start() + 1, "marker", True))
 
     analysis.spans.sort(key=lambda span: (span.start, span.end, span.tag))
