@@ -220,6 +220,77 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(self.root.bind("<Control-Shift-P>"))
         self.assertTrue(self.root.bind("<Control-Shift-O>"))
 
+    def test_enter_continues_and_ends_markdown_structures(self) -> None:
+        cases = (
+            ("- item", "end-1c", "- item\n- "),
+            ("1. item", "end-1c", "1. item\n2. "),
+            ("- [x] task", "end-1c", "- [x] task\n- [ ] "),
+            ("> quote", "end-1c", "> quote\n> "),
+            ("> - item", "end-1c", "> - item\n> - "),
+            ("  indented", "end-1c", "  indented\n  "),
+            ("```\n  - code", "end-1c", "```\n  - code\n  "),
+            ("- item\n- ", "end-1c", "- item\n"),
+            ("> quote\n> ", "end-1c", "> quote\n"),
+            ("> - item\n> - ", "end-1c", "> - item\n> "),
+            ("- suffix", "1.2", "- \n- suffix"),
+        )
+
+        for source, insert_index, expected in cases:
+            with self.subTest(source=source, insert_index=insert_index):
+                self.app._replace_text(source)
+                self.app.editor.mark_set("insert", insert_index)
+
+                result = self.app._on_return()
+
+                self.assertEqual(result, "break")
+                self.assertEqual(self.app.editor.get("1.0", "end-1c"), expected)
+
+    def test_tab_and_shift_enter_support_structured_typing(self) -> None:
+        self.app._replace_text("- item")
+        self.app.editor.mark_set("insert", "end-1c")
+
+        self.assertEqual(self.app._on_list_indent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "  - item")
+        self.assertEqual(self.app._on_list_outdent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "- item")
+
+        self.app._replace_text("> - item")
+        self.app.editor.mark_set("insert", "end-1c")
+        self.assertEqual(self.app._on_list_indent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), ">   - item")
+        self.assertEqual(self.app._on_list_outdent(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "> - item")
+
+        self.app._replace_text("- item")
+        self.app.editor.mark_set("insert", "end-1c")
+        self.assertEqual(self.app._on_shift_return(), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "- item\n")
+
+    def test_pair_completion_wraps_selection_and_skips_existing_closer(self) -> None:
+        self.app._replace_text("text ")
+        self.app.editor.mark_set("insert", "end-1c")
+
+        self.assertEqual(self.app._handle_pair_character("("), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "text ()")
+        self.assertEqual(self.app.editor.index("insert"), "1.6")
+        self.assertEqual(self.app._handle_pair_character(")"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "text ()")
+        self.assertEqual(self.app.editor.index("insert"), "1.7")
+
+        self.app._replace_text("code")
+        self.app.editor.tag_add("sel", "1.0", "1.4")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "`code`")
+        self.assertEqual(self.app.editor.get("sel.first", "sel.last"), "code")
+
+        self.app._replace_text("")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "``")
+        self.assertEqual(self.app.editor.index("insert"), "1.1")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app._handle_pair_character("`"), "break")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "```")
+
     def test_status_is_placed_between_title_and_marker_toggle(self) -> None:
         header = self.app.status_label.master
         title_label = next(

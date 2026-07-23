@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import os
 from pathlib import Path
+import re
 from threading import Thread
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, ttk
@@ -71,6 +72,20 @@ SCRIPT_FONT_TAG_DELAY_MS = 25
 MAX_TABLE_DIMENSION = 100
 OPAQUE_WINDOW_ALPHA = 1.0
 TRANSLUCENT_WINDOW_ALPHA = 0.6
+LIST_INDENT = "  "
+TYPING_LIST_PATTERN = re.compile(r"^(\s*)([-+*]|\d+[.)])([ \t]+)(.*)$")
+TYPING_TASK_PATTERN = re.compile(r"^\[([ xX])\]([ \t]+)(.*)$")
+TYPING_QUOTE_PATTERN = re.compile(r"^( {0,3})((?:> ?)*>)[ ](.*)$")
+TYPING_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+PAIR_CHARACTERS = {
+    "(": ")",
+    "[": "]",
+    "{": "}",
+    '"': '"',
+    "'": "'",
+    "`": "`",
+}
+CLOSING_PAIR_CHARACTERS = frozenset(PAIR_CHARACTERS.values())
 
 
 def build_table_template(row_count: int, column_count: int) -> str:
@@ -492,6 +507,11 @@ class MarkdownQuickMemoApp:
         self.root.bind("<Control-y>", lambda event: self._edit_event("<<Redo>>"))
         self.root.bind("<Escape>", lambda event: self.hide_search() if self._search_visible else None)
         self.editor.bind("<<Modified>>", self._on_modified)
+        self.editor.bind("<Return>", self._on_return)
+        self.editor.bind("<Shift-Return>", self._on_shift_return)
+        self.editor.bind("<Tab>", self._on_list_indent)
+        self.editor.bind("<Shift-Tab>", self._on_list_outdent)
+        self.editor.bind("<KeyPress>", self._on_pair_key, add=True)
         self.editor.bind("<KeyRelease>", self._on_cursor_moved, add=True)
         self.editor.bind("<ButtonRelease-1>", self._on_cursor_moved, add=True)
         self.editor.bind("<Control-Button-1>", self._on_control_click, add=True)
@@ -523,6 +543,244 @@ class MarkdownQuickMemoApp:
         except tk.TclError:
             pass
         return self._break()
+
+    def _delete_selection(self) -> str | None:
+        selection = self._selection_indices()
+        if selection is None:
+            return None
+        start, end = selection
+        self.editor.delete(start, end)
+        self.editor.mark_set("insert", start)
+        return start
+
+    def _insert_assisted_text(self, text: str) -> None:
+        self.editor.edit_separator()
+        self._delete_selection()
+        self.editor.insert("insert", text)
+        self.editor.edit_separator()
+
+    @staticmethod
+    def _inside_fenced_code_block(text_before_line: str) -> bool:
+        open_fence: str | None = None
+        for line in text_before_line.splitlines():
+            if open_fence is None:
+                match = TYPING_FENCE_PATTERN.match(line)
+                if match is not None:
+                    open_fence = match.group(1)
+                continue
+            closing_fence = re.fullmatch(
+                rf"[ \t]*{re.escape(open_fence[0])}{{{len(open_fence)},}}[ \t]*",
+                line,
+            )
+            if closing_fence is not None:
+                open_fence = None
+        return open_fence is not None
+
+    @staticmethod
+    def _next_list_prefix(marker: str) -> str:
+        ordered = re.fullmatch(r"(\d+)([.)])", marker)
+        if ordered is None:
+            return marker
+        return f"{int(ordered.group(1)) + 1}{ordered.group(2)}"
+
+    def _on_return(self, _event: tk.Event | None = None) -> str:
+        if self._selection_indices() is not None:
+            self._insert_assisted_text("\n")
+            return self._break()
+
+        line_start = self.editor.index("insert linestart")
+        line_end = self.editor.index("insert lineend")
+        line = self.editor.get(line_start, line_end)
+        text_before_line = self.editor.get("1.0", line_start)
+        cursor_column = int(self.editor.index("insert").split(".")[1])
+        line_before_cursor = line[:cursor_column]
+        line_after_cursor = line[cursor_column:]
+
+        if self._inside_fenced_code_block(text_before_line):
+            indentation = re.match(r"^[ \t]*", line_before_cursor).group(0)
+            self._insert_assisted_text("\n" + indentation)
+            return self._break()
+
+        quote_match = TYPING_QUOTE_PATTERN.match(line_before_cursor)
+        quote_prefix = ""
+        content_before_cursor = line_before_cursor
+        if quote_match is not None:
+            quote_prefix = line_before_cursor[: quote_match.start(3)]
+            content_before_cursor = quote_match.group(3)
+
+        list_match = TYPING_LIST_PATTERN.match(content_before_cursor)
+        if list_match is not None:
+            indentation, marker, spacing, item_content = list_match.groups()
+            task_match = TYPING_TASK_PATTERN.match(item_content)
+            if task_match is not None:
+                task_spacing = task_match.group(2)
+                visible_content = task_match.group(3)
+                continuation = (
+                    quote_prefix
+                    + indentation
+                    + marker
+                    + spacing
+                    + "[ ]"
+                    + task_spacing
+                )
+            else:
+                visible_content = item_content
+                continuation = (
+                    quote_prefix
+                    + indentation
+                    + self._next_list_prefix(marker)
+                    + spacing
+                )
+
+            if not (visible_content + line_after_cursor).strip():
+                self.editor.edit_separator()
+                self.editor.delete(line_start, line_end)
+                self.editor.insert(line_start, quote_prefix)
+                self.editor.mark_set("insert", f"{line_start} + {len(quote_prefix)}c")
+                self.editor.edit_separator()
+            else:
+                self._insert_assisted_text("\n" + continuation)
+            return self._break()
+
+        if quote_match is not None:
+            if not (content_before_cursor + line_after_cursor).strip():
+                self.editor.edit_separator()
+                self.editor.delete(line_start, line_end)
+                self.editor.mark_set("insert", line_start)
+                self.editor.edit_separator()
+            else:
+                self._insert_assisted_text("\n" + quote_prefix)
+            return self._break()
+
+        indentation = re.match(r"^[ \t]*", line_before_cursor).group(0)
+        self._insert_assisted_text("\n" + indentation)
+        return self._break()
+
+    def _on_shift_return(self, _event: tk.Event | None = None) -> str:
+        self._insert_assisted_text("\n")
+        return self._break()
+
+    @staticmethod
+    def _list_content_start(line: str) -> int | None:
+        quote_match = TYPING_QUOTE_PATTERN.match(line)
+        if quote_match is None:
+            content_start = 0
+            content = line
+        else:
+            content_start = quote_match.start(3)
+            content = quote_match.group(3)
+        if TYPING_LIST_PATTERN.match(content) is None:
+            return None
+        return content_start
+
+    def _on_list_indent(self, _event: tk.Event | None = None) -> str | None:
+        line_start = self.editor.index("insert linestart")
+        line = self.editor.get(line_start, f"{line_start} lineend")
+        content_start = self._list_content_start(line)
+        if content_start is None:
+            return None
+        self.editor.edit_separator()
+        self.editor.insert(f"{line_start} + {content_start}c", LIST_INDENT)
+        self.editor.edit_separator()
+        return self._break()
+
+    def _on_list_outdent(self, _event: tk.Event | None = None) -> str | None:
+        line_start = self.editor.index("insert linestart")
+        line = self.editor.get(line_start, f"{line_start} lineend")
+        content_start = self._list_content_start(line)
+        if content_start is None:
+            return None
+        list_content = line[content_start:]
+        if list_content.startswith("\t"):
+            removable_width = 1
+        else:
+            removable_width = min(
+                len(list_content) - len(list_content.lstrip(" ")),
+                len(LIST_INDENT),
+            )
+        if removable_width == 0:
+            return self._break()
+        indentation_start = f"{line_start} + {content_start}c"
+        self.editor.edit_separator()
+        self.editor.delete(
+            indentation_start,
+            f"{indentation_start} + {removable_width}c",
+        )
+        self.editor.edit_separator()
+        return self._break()
+
+    @staticmethod
+    def _quote_pair_is_contextual(
+        previous_character: str,
+        next_character: str,
+    ) -> bool:
+        previous_allows_pair = not previous_character or not (
+            previous_character.isalnum() or previous_character == "_"
+        )
+        next_allows_pair = not next_character or not (
+            next_character.isalnum() or next_character == "_"
+        )
+        return previous_allows_pair and next_allows_pair
+
+    def _handle_pair_character(self, character: str) -> str | None:
+        if character not in PAIR_CHARACTERS and character not in CLOSING_PAIR_CHARACTERS:
+            return None
+
+        selection = self._selection_indices()
+        if selection is not None and character in PAIR_CHARACTERS:
+            start, end = selection
+            selected_text = self.editor.get(start, end)
+            closing_character = PAIR_CHARACTERS[character]
+            self.editor.edit_separator()
+            self.editor.delete(start, end)
+            self.editor.insert(start, character + selected_text + closing_character)
+            self.editor.tag_add("sel", f"{start} + 1c", f"{end} + 1c")
+            self.editor.mark_set("insert", f"{end} + 1c")
+            self.editor.edit_separator()
+            return self._break()
+
+        next_character = self.editor.get("insert", "insert +1c")
+        if character == "`" and next_character == "`":
+            line_before_cursor = self.editor.get("insert linestart", "insert")
+            line_after_cursor = self.editor.get("insert", "insert lineend")
+            if (
+                line_before_cursor.strip(" \t") == "`"
+                and line_after_cursor.strip(" \t") == "`"
+            ):
+                self.editor.edit_separator()
+                self.editor.insert("insert", "`")
+                self.editor.edit_separator()
+                return self._break()
+        if character in CLOSING_PAIR_CHARACTERS and next_character == character:
+            self.editor.mark_set("insert", "insert +1c")
+            return self._break()
+
+        previous_character = self.editor.get("insert -1c", "insert")
+        if previous_character == "\\":
+            return None
+
+        if character == "`":
+            line_before_cursor = self.editor.get("insert linestart", "insert")
+            if line_before_cursor.count("`") % 2 == 1:
+                return None
+
+        if character in {'"', "'"} and not self._quote_pair_is_contextual(
+            previous_character,
+            next_character,
+        ):
+            return None
+
+        closing_character = PAIR_CHARACTERS.get(character)
+        if closing_character is None:
+            return None
+        self.editor.edit_separator()
+        self.editor.insert("insert", character + closing_character)
+        self.editor.mark_set("insert", "insert -1c")
+        self.editor.edit_separator()
+        return self._break()
+
+    def _on_pair_key(self, event: tk.Event) -> str | None:
+        return self._handle_pair_character(event.char)
 
     def _on_modified(self, _event: tk.Event | None = None) -> None:
         if self._rendering:
