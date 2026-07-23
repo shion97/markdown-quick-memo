@@ -289,7 +289,16 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.editor.index("insert"), "1.1")
         self.assertEqual(self.app._handle_pair_character("`"), "break")
         self.assertEqual(self.app._handle_pair_character("`"), "break")
-        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "```")
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), "```\n```")
+        self.assertEqual(self.app.editor.index("insert"), "1.3")
+
+        self.app.editor.insert("insert", "python")
+        self.assertEqual(self.app._on_return(), "break")
+        self.assertEqual(
+            self.app.editor.get("1.0", "end-1c"),
+            "```python\n\n```",
+        )
+        self.assertEqual(self.app.editor.index("insert"), "2.0")
 
     def test_status_is_placed_between_title_and_marker_toggle(self) -> None:
         header = self.app.status_label.master

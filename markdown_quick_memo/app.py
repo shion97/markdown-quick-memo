@@ -743,6 +743,15 @@ class MarkdownQuickMemoApp:
         if character == "`" and next_character == "`":
             line_before_cursor = self.editor.get("insert linestart", "insert")
             line_after_cursor = self.editor.get("insert", "insert lineend")
+            opening_fence = re.fullmatch(r"([ \t]*)``", line_before_cursor)
+            if opening_fence is not None and line_after_cursor == "`":
+                opening_end = self.editor.index("insert +1c")
+                indentation = opening_fence.group(1)
+                self.editor.edit_separator()
+                self.editor.insert(opening_end, "\n" + indentation + "```")
+                self.editor.mark_set("insert", opening_end)
+                self.editor.edit_separator()
+                return self._break()
             if (
                 line_before_cursor.strip(" \t") == "`"
                 and line_after_cursor.strip(" \t") == "`"
