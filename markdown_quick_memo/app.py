@@ -26,6 +26,7 @@ from .markdown_styler import (
     ListMarker,
     MarkdownAnalysis,
     MathExpression,
+    QuoteMarker,
     TableBlock,
     analyze_markdown,
 )
@@ -43,6 +44,10 @@ LIST_NUMBER_FONT_SIZE = 10
 TABLE_LINE_COLOR = "#94a3b8"
 TABLE_LINE_WIDTH = 1
 TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
+QUOTE_BACKGROUND = "#f3f4f6"
+QUOTE_BAR_COLOR = "#60a5fa"
+QUOTE_BAR_WIDTH = 3
+QUOTE_BAR_GAP = 6
 HEADING_FONT_SIZES = (22, 19, 17, 15, 13, 12)
 HEADING_MATH_FONT_SCALE = 0.9
 HEADING_MATH_FONT_SIZES = tuple(
@@ -356,8 +361,14 @@ class MarkdownQuickMemoApp:
         self.editor.tag_configure(
             "code_language", font=code_language_font, foreground=colors["muted"], background=colors["code_bg"]
         )
-        self.editor.tag_configure("quote", foreground=colors["quote"], lmargin1=18, lmargin2=18)
-        self.editor.tag_configure("quote_marker", foreground="#9ca3af", font=bold)
+        self.editor.tag_configure(
+            "quote",
+            foreground=colors["quote"],
+            background=QUOTE_BACKGROUND,
+            lmargin1=8,
+            lmargin2=8,
+        )
+        self.editor.tag_configure("quote_marker", foreground=QUOTE_BAR_COLOR, font=bold)
         self.editor.tag_configure("list_item", lmargin1=12, lmargin2=28)
         self.editor.tag_configure("list_marker", foreground=colors["foreground"], font=bold)
         self.editor.tag_configure("checkbox", foreground=colors["muted"])
@@ -767,6 +778,8 @@ class MarkdownQuickMemoApp:
             decorations.append((table.start, table.end, "table", table))
         for marker in self._analysis.list_markers:
             decorations.append((marker.start, marker.end, "list_marker", marker))
+        for marker in self._analysis.quote_markers:
+            decorations.append((marker.start, marker.end, "quote_marker", marker))
         for expression in self._analysis.math_expressions:
             if any(table.start <= expression.start and expression.end <= table.end for table in self._analysis.tables):
                 continue
@@ -786,6 +799,8 @@ class MarkdownQuickMemoApp:
             return not record.start <= insert_offset < record.end
         if record.decoration_type == "math":
             return not record.start <= insert_offset < record.end
+        if record.decoration_type == "quote_marker" and record.start == record.end:
+            return not active_line_start <= record.start < active_line_end
         return record.end <= active_line_start or record.start >= active_line_end
 
     def _create_decoration_widget(self, record: _DecorationRecord) -> tk.Widget:
@@ -795,6 +810,8 @@ class MarkdownQuickMemoApp:
             return self._create_table_widget(record.decoration)  # type: ignore[arg-type]
         if record.decoration_type == "list_marker":
             return self._create_list_marker_widget(record.decoration)  # type: ignore[arg-type]
+        if record.decoration_type == "quote_marker":
+            return self._create_quote_marker_widget(record.decoration)  # type: ignore[arg-type]
         return self._create_math_widget(record.decoration)  # type: ignore[arg-type]
 
     def _mount_decoration(self, record: _DecorationRecord) -> None:
@@ -803,7 +820,8 @@ class MarkdownQuickMemoApp:
         widget = self._create_decoration_widget(record)
         self.editor.window_create(record.start_mark, window=widget, align="center")
         self._bind_editor_decoration_events(widget)
-        self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
+        if record.start < record.end:
+            self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
         window_index = self.editor.index(str(widget))
         window_end = f"{window_index} +1c"
         for marker_tag in ("marker", "marker_concealable", "marker_hidden"):
@@ -829,7 +847,8 @@ class MarkdownQuickMemoApp:
         except ValueError:
             pass
         record.widget = None
-        self.editor.tag_remove("marker_hidden", record.start_mark, record.end_mark)
+        if record.start < record.end:
+            self.editor.tag_remove("marker_hidden", record.start_mark, record.end_mark)
         self._set_marker_visibility(record.start_mark, record.end_mark, hidden=True)
 
     def _sync_block_decorations(
@@ -892,6 +911,28 @@ class MarkdownQuickMemoApp:
             padx=1,
             pady=0,
         )
+
+    def _create_quote_marker_widget(self, marker: QuoteMarker) -> tk.Canvas:
+        marker_width = marker.depth * (QUOTE_BAR_WIDTH + QUOTE_BAR_GAP) + 3
+        canvas = tk.Canvas(
+            self.editor,
+            width=marker_width,
+            height=18,
+            background=QUOTE_BACKGROUND,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        for depth in range(marker.depth):
+            x_position = 2 + depth * (QUOTE_BAR_WIDTH + QUOTE_BAR_GAP)
+            canvas.create_rectangle(
+                x_position,
+                0,
+                x_position + QUOTE_BAR_WIDTH,
+                18,
+                fill=QUOTE_BAR_COLOR,
+                outline="",
+            )
+        return canvas
 
     def _create_math_widget(
         self,

@@ -49,6 +49,13 @@ class ListMarker:
 
 
 @dataclass(frozen=True, slots=True)
+class QuoteMarker:
+    start: int
+    end: int
+    depth: int
+
+
+@dataclass(frozen=True, slots=True)
 class MathExpression:
     start: int
     end: int
@@ -64,6 +71,7 @@ class MarkdownAnalysis:
     horizontal_rules: list[HorizontalRule] = field(default_factory=list)
     tables: list[TableBlock] = field(default_factory=list)
     list_markers: list[ListMarker] = field(default_factory=list)
+    quote_markers: list[QuoteMarker] = field(default_factory=list)
     math_expressions: list[MathExpression] = field(default_factory=list)
 
 
@@ -71,6 +79,17 @@ FENCE_PATTERN = re.compile(r"(?ms)^([ \t]*)(`{3,}|~{3,})[^\n]*\n(.*?)(?:^\1\2[ \
 DISPLAY_MATH_PATTERN = re.compile(r"(?ms)(?<!\\)(?<!\$)\$\$(?!\$)(.+?)(?<!\\)\$\$(?!\$)")
 INLINE_MATH_PATTERN = re.compile(r"(?<!\\)(?<!\$)\$(?!\$)(?=\S)(.+?)(?<=\S)(?<!\\)\$(?!\$)")
 LIST_ITEM_PATTERN = re.compile(r"^(\s*)([-+*]|\d+[.)])([ \t]+)")
+QUOTE_LINE_PATTERN = re.compile(r"^( {0,3})((?:> ?)*>)[ ](.*)$")
+QUOTE_INTERRUPT_PATTERN = re.compile(
+    r"^( {0,3})(?:"
+    r"#{1,6}(?:[ \t]+|$)|"
+    r"`{3,}|~{3,}|"
+    r"(?:[-+*]|\d+[.)])[ \t]+|"
+    r"(?:\*[ \t]*){3,}|"
+    r"(?:-[ \t]*){3,}|"
+    r"(?:_[ \t]*){3,}"
+    r")"
+)
 INLINE_CODE_PATTERN = re.compile(r"(?<!\\)(`+)(?=\S)(.+?)(?<=\S)\1")
 IMAGE_PATTERN = re.compile(r"(?<!\\)!\[([^\]]*)\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
@@ -292,12 +311,46 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
     ordered_counters: dict[int, int] = {}
     previous_list_types: dict[int, str] = {}
     previous_was_list = False
+    current_quote_depth = 0
+    quote_paragraph_open = False
 
     for line_index, (line_start, line) in enumerate(line_records):
         line_end = line_start + len(line)
         if _overlaps(line_start, line_end, protected_ranges):
             previous_was_list = False
+            current_quote_depth = 0
+            quote_paragraph_open = False
             continue
+
+        quote = QUOTE_LINE_PATTERN.match(line)
+        if quote:
+            current_quote_depth = quote.group(2).count(">")
+            quote_content = quote.group(3)
+            quote_paragraph_open = bool(
+                quote_content.strip()
+                and not QUOTE_INTERRUPT_PATTERN.match(quote_content)
+            )
+            marker_end = line_start + quote.start(3)
+            style_end = min(line_end + 1, len(text))
+            analysis.spans.append(StyleSpan(line_start, style_end, "quote"))
+            analysis.spans.append(StyleSpan(line_start, marker_end, "quote_marker", True))
+            analysis.quote_markers.append(
+                QuoteMarker(line_start, marker_end, current_quote_depth)
+            )
+        elif (
+            current_quote_depth
+            and quote_paragraph_open
+            and line.strip()
+            and not QUOTE_INTERRUPT_PATTERN.match(line)
+        ):
+            style_end = min(line_end + 1, len(text))
+            analysis.spans.append(StyleSpan(line_start, style_end, "quote"))
+            analysis.quote_markers.append(
+                QuoteMarker(line_start, line_start, current_quote_depth)
+            )
+        else:
+            current_quote_depth = 0
+            quote_paragraph_open = False
 
         heading = re.match(r"^( {0,3})(#{1,6})([ \t]+)(.*)$", line)
         if heading:
@@ -305,13 +358,6 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
             marker_end = line_start + heading.start(4)
             analysis.spans.append(StyleSpan(marker_end, line_end, f"heading{level}"))
             analysis.spans.append(StyleSpan(line_start, marker_end, "marker", True))
-
-        quote = re.match(r"^( {0,3})(>)([ \t]?)", line)
-        if quote:
-            analysis.spans.append(StyleSpan(line_start, line_end, "quote"))
-            analysis.spans.append(
-                StyleSpan(line_start + quote.start(2), line_start + quote.end(2), "quote_marker")
-            )
 
         list_item = LIST_ITEM_PATTERN.match(line)
         if list_item:

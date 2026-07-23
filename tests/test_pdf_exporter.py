@@ -27,6 +27,24 @@ from markdown_quick_memo.math_renderer import render_math_png
 
 
 class PdfExporterTests(unittest.TestCase):
+    def test_quotes_use_standard_nesting_lazy_continuation_and_space_trigger(self) -> None:
+        rendered_html = _markdown_to_html(
+            "a\n> b\n> c\n>> d\n> e\n>>> f\ng\n\nh"
+        )
+
+        self.assertEqual(rendered_html.count("<blockquote>"), 3)
+        self.assertIn("<p>b<br>\nc</p>", rendered_html)
+        self.assertIn("<p>d<br>\ne</p>", rendered_html)
+        self.assertIn("<p>f<br>\ng</p>", rendered_html)
+
+        strict_html = _markdown_to_html("> valid\n\n>invalid")
+        self.assertEqual(strict_html.count("<blockquote>"), 1)
+        self.assertIn("<p>&gt;invalid</p>", strict_html)
+
+        fence = "`" * 3
+        fenced_html = _markdown_to_html(f"{fence}\n>code\n{fence}")
+        self.assertIn("<pre><code>&gt;code", fenced_html)
+
     def test_heading_inline_math_uses_heading_sizes(self) -> None:
         markdown = "\n\n".join(
             f"{'#' * level} 見出し{level} $x_{level}^2$"
