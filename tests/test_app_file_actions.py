@@ -35,6 +35,12 @@ class AppFileActionTests(unittest.TestCase):
             self.assertTrue(renamed_path.exists())
             self.assertEqual(app.current_path, renamed_path.resolve())
 
+    def test_ordered_list_continuation_uses_one_as_markdown_source(self) -> None:
+        self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("1."), "1.")
+        self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("7."), "1.")
+        self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("3)"), "1.")
+        self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("-"), "-")
+
     def test_save_folder_and_exported_pdf_open_with_default_app(self) -> None:
         with TemporaryDirectory() as directory:
             markdown_path = Path(directory) / "memo.md"

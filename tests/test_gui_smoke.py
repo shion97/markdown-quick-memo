@@ -247,7 +247,8 @@ class GuiSmokeTests(unittest.TestCase):
     def test_enter_continues_and_ends_markdown_structures(self) -> None:
         cases = (
             ("- item", "end-1c", "- item\n- "),
-            ("1. item", "end-1c", "1. item\n2. "),
+            ("1. item", "end-1c", "1. item\n1. "),
+            ("7. item", "end-1c", "7. item\n1. "),
             ("- [x] task", "end-1c", "- [x] task\n- [ ] "),
             ("> quote", "end-1c", "> quote\n> "),
             ("> - item", "end-1c", "> - item\n> - "),
@@ -271,12 +272,16 @@ class GuiSmokeTests(unittest.TestCase):
 
     def test_wrapped_list_lines_align_with_item_content(self) -> None:
         self.app._replace_text("- first\n  10. nested")
+        self.app.editor.mark_set("insert", "end-1c")
         self.app.render_markdown()
 
         first_margin = int(self.app.editor.tag_cget("list_wrap_0", "lmargin2"))
         nested_margin = int(self.app.editor.tag_cget("list_wrap_1", "lmargin2"))
+        list_font = tkfont.nametofont("TkTextFont")
+        bullet_font = self.app._list_marker_fonts["bullet"]
+        expected_first_margin = 12 + bullet_font.measure("●") + 2 + list_font.measure(" ")
 
-        self.assertGreater(first_margin, 12)
+        self.assertEqual(first_margin, expected_first_margin)
         self.assertGreater(nested_margin, first_margin)
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:
