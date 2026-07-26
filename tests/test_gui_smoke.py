@@ -250,7 +250,7 @@ class GuiSmokeTests(unittest.TestCase):
                 file_menu_indices["ファイル名を変更..."],
                 "accelerator",
             ),
-            "F2",
+            "Ctrl+Shift+R",
         )
         self.assertEqual(
             file_menu.entrycget(
@@ -259,7 +259,7 @@ class GuiSmokeTests(unittest.TestCase):
             ),
             "Ctrl+Shift+E",
         )
-        self.assertTrue(self.root.bind("<F2>"))
+        self.assertTrue(self.root.bind("<Control-Shift-R>"))
         self.assertTrue(self.root.bind("<Control-Shift-E>"))
         self.assertTrue(self.root.bind("<Control-t>"))
         self.assertTrue(self.root.bind("<Control-Shift-P>"))

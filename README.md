@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
 | 開く | `Ctrl + O` |
 | 保存 | `Ctrl + S` |
 | 名前を付けて保存 | `Ctrl + Shift + S` |
-| 開いているファイルの名前を変更 | `F2` |
+| 開いているファイルの名前を変更 | `Ctrl + Shift + R` |
 | 保存先をエクスプローラーで開く | `Ctrl + Shift + E` |
 | PDFに書き出す | `Ctrl + Shift + P` |
 | 待機状態へ戻す | `Alt + F4` / ウィンドウの閉じるボタン |

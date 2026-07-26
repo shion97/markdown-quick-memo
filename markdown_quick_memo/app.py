@@ -365,7 +365,7 @@ class MarkdownQuickMemoApp:
         file_menu.add_command(label="名前を付けて保存...", accelerator="Ctrl+Shift+S", command=self.save_as)
         file_menu.add_command(
             label="ファイル名を変更...",
-            accelerator="F2",
+            accelerator="Ctrl+Shift+R",
             command=self.rename_current_file,
         )
         file_menu.add_command(
@@ -614,7 +614,7 @@ class MarkdownQuickMemoApp:
             "<Control-o>": self.open_document,
             "<Control-s>": self.save,
             "<Control-Shift-S>": self.save_as,
-            "<F2>": self.rename_current_file,
+            "<Control-Shift-R>": self.rename_current_file,
             "<Control-Shift-E>": self.open_save_folder,
             "<Control-q>": self.close,
             "<Control-f>": self.show_search,

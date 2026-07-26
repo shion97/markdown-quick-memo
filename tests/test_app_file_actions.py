@@ -54,7 +54,7 @@ class AppFileActionTests(unittest.TestCase):
             if len(call.args) >= 2
         }
         self.assertEqual(
-            root_bindings["<F2>"].__func__,
+            root_bindings["<Control-Shift-R>"].__func__,
             MarkdownQuickMemoApp.rename_current_file,
         )
         self.assertEqual(
