@@ -158,16 +158,18 @@ class GuiSmokeTests(unittest.TestCase):
         self.app.editor.mark_set("insert", "end-1c")
         self.app.render_markdown()
 
-        preview_labels = [
-            widget.cget("text")
+        marker_labels = [
+            descendant
             for widget in self.app._decoration_widgets
-            if isinstance(widget, tk.Label) and widget.cget("text")
+            for descendant in _descendants(widget)
+            if isinstance(descendant, tk.Label) and descendant.cget("text")
         ]
+        preview_labels = [label.cget("text") for label in marker_labels]
         self.assertCountEqual(preview_labels, ["1.", "2.", "○", "1."])
         bullet_widget = next(
-            widget
-            for widget in self.app._decoration_widgets
-            if isinstance(widget, tk.Label) and widget.cget("text") == "○"
+            label
+            for label in marker_labels
+            if label.cget("text") == "○"
         )
         bullet_font = tkfont.Font(font=bullet_widget.cget("font"))
         self.assertEqual(bullet_font.actual("size"), 6)
@@ -298,17 +300,53 @@ class GuiSmokeTests(unittest.TestCase):
 
         first_margin = int(self.app.editor.tag_cget("list_wrap_0", "lmargin2"))
         nested_margin = int(self.app.editor.tag_cget("list_wrap_1", "lmargin2"))
+        first_line_margin = int(self.app.editor.tag_cget("list_wrap_0", "lmargin1"))
+        nested_line_margin = int(self.app.editor.tag_cget("list_wrap_1", "lmargin1"))
         list_font = tkfont.nametofont("TkTextFont")
-        bullet_font = self.app._list_marker_fonts["bullet"]
-        expected_first_margin = 12 + bullet_font.measure("●") + 2 + list_font.measure(" ")
-        expected_nested_margin = (
-            12
-            + list_font.measure("   ")
-            + self.app._list_source_marker_font.measure("10.")
+        source_font = self.app._list_source_marker_font
+        marker_column_width = max(
+            source_font.measure("-"),
+            source_font.measure("10."),
+            self.app._list_marker_fonts["bullet"].measure("●"),
+            self.app._list_marker_fonts["ordered"].measure("10."),
         )
+        expected_first_margin = 12 + list_font.measure(" ") + marker_column_width
+        expected_nested_margin = 12 + list_font.measure("   ") + marker_column_width
 
         self.assertEqual(first_margin, expected_first_margin)
         self.assertEqual(nested_margin, expected_nested_margin)
+        self.assertEqual(
+            nested_margin - first_margin,
+            list_font.measure("  "),
+        )
+        self.assertEqual(
+            first_line_margin + marker_column_width + list_font.measure(" "),
+            first_margin,
+        )
+        self.assertEqual(
+            nested_line_margin
+            + list_font.measure("  ")
+            + source_font.measure("10.")
+            + list_font.measure(" "),
+            nested_margin,
+        )
+
+        self.app.editor.mark_set("insert", "1.2")
+        self.app._refresh_active_line(previous_line=2)
+
+        moved_first_margin = int(self.app.editor.tag_cget("list_wrap_0", "lmargin1"))
+        moved_nested_margin = int(self.app.editor.tag_cget("list_wrap_1", "lmargin1"))
+        self.assertEqual(
+            moved_first_margin + source_font.measure("-") + list_font.measure(" "),
+            first_margin,
+        )
+        self.assertEqual(
+            moved_nested_margin
+            + list_font.measure("  ")
+            + marker_column_width
+            + list_font.measure(" "),
+            nested_margin,
+        )
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:
         self.app._replace_text("- item")

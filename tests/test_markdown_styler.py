@@ -109,6 +109,10 @@ class MarkdownStylerTests(unittest.TestCase):
         )
         self.assertEqual([marker.depth for marker in markers], [0, 0, 1, 1, 0, 1, 1, 2])
         self.assertEqual(
+            [marker.source for marker in markers],
+            ["1.", "1.", "-", "+", "1.", "1.", "1.", "*"],
+        )
+        self.assertEqual(
             [text[marker.content_start] for marker in markers],
             ["1", "2", "子", "子", "3", "子", "子", "孫"],
         )

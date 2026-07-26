@@ -13,8 +13,8 @@ Markdown原文を正本として、リスト・引用・インデント・対記
 - `markdown_quick_memo/app.py#MarkdownQuickMemoApp._on_return` — 現在行の構造を判定して次行のMarkdown原文を生成する。
 - `markdown_quick_memo/app.py#MarkdownQuickMemoApp._continuation_list_marker` — 番号付きリストの継続記号を`1.`へ正規化する。
 - `markdown_quick_memo/markdown_styler.py#analyze_markdown` — リスト階層と表示用連番、本文開始位置を解析する。
-- `markdown_quick_memo/app.py#MarkdownQuickMemoApp._apply_list_wrap_indents` — 原文の太字マーカーまたは表示用マーカーの実フォント幅から折り返し行の左余白を決める。
-- `markdown_quick_memo/app.py#MarkdownQuickMemoApp._create_list_marker_widget` — 非アクティブ行のリストマーカーを表示する。
+- `markdown_quick_memo/app.py#MarkdownQuickMemoApp._apply_list_wrap_indents` — 原文・表示用マーカーから共通列幅を決め、状態別の左余白補正と一定の階層差を適用する。
+- `markdown_quick_memo/app.py#MarkdownQuickMemoApp._create_list_marker_widget` — 共通幅の領域内へ右揃えして非アクティブ行のプレビューマーカーを表示する。
 
 ### 関連
 

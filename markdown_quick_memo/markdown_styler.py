@@ -46,6 +46,7 @@ class ListMarker:
     start: int
     end: int
     content_start: int
+    source: str
     label: str
     depth: int
     ordered: bool
@@ -488,6 +489,7 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
                     marker_start,
                     marker_end,
                     line_start + list_item.end(),
+                    source_marker,
                     preview_label,
                     depth,
                     ordered,

@@ -101,6 +101,26 @@ def open_with_default_app(path: Path) -> None:
     startfile(str(path))
 
 
+def _list_layout_margins(
+    indentation_width: int,
+    spacing_width: int,
+    source_marker_width: int,
+    marker_column_width: int,
+    *,
+    preview_is_mounted: bool,
+) -> tuple[int, int]:
+    first_line_margin = LIST_FIRST_LINE_MARGIN
+    if not preview_is_mounted:
+        first_line_margin += marker_column_width - source_marker_width
+    wrap_margin = (
+        LIST_FIRST_LINE_MARGIN
+        + indentation_width
+        + spacing_width
+        + marker_column_width
+    )
+    return first_line_margin, wrap_margin
+
+
 def build_table_template(row_count: int, column_count: int) -> str:
     """Create a Markdown table whose visible cells are filled with ``q``."""
 
@@ -179,6 +199,7 @@ class MarkdownQuickMemoApp:
         self._character_count = 0
         self._word_count = 0
         self._document_statistics_dirty = True
+        self._list_marker_column_width = 0
 
         self._configure_named_fonts()
         self._configure_window()
@@ -1065,37 +1086,42 @@ class MarkdownQuickMemoApp:
         """Align wrapped list lines with the first character of the item body."""
 
         list_font = tkfont.nametofont("TkTextFont")
-        for marker_index, marker in enumerate(self._analysis.list_markers):
+        source_marker_widths = [
+            self._list_source_marker_font.measure(marker.source)
+            for marker in self._analysis.list_markers
+        ]
+        preview_marker_widths = [
+            self._list_marker_font(marker).measure(marker.label)
+            for marker in self._analysis.list_markers
+        ]
+        self._list_marker_column_width = max(
+            [*source_marker_widths, *preview_marker_widths],
+            default=0,
+        )
+        for marker_index, (marker, source_marker_width) in enumerate(
+            zip(self._analysis.list_markers, source_marker_widths, strict=True)
+        ):
             line_start = text.rfind("\n", 0, marker.start) + 1
             line_end = text.find("\n", marker.content_start)
             if line_end < 0:
                 line_end = len(text)
+            indentation = text[line_start : marker.start].expandtabs(4)
+            spacing = text[marker.end : marker.content_start].expandtabs(4)
             marker_on_active_line = (
                 marker.end > active_line_start and marker.start < active_line_end
             )
-            marker_is_visible = not self.hide_markers.get() or marker_on_active_line
-            if marker_is_visible:
-                surrounding_text = (
-                    text[line_start : marker.start]
-                    + text[marker.end : marker.content_start]
-                ).expandtabs(4)
-                source_marker = text[marker.start : marker.end]
-                prefix_width = (
-                    list_font.measure(surrounding_text)
-                    + self._list_source_marker_font.measure(source_marker)
-                )
-            else:
-                surrounding_text = (
-                    text[line_start : marker.start]
-                    + text[marker.end : marker.content_start]
-                ).expandtabs(4)
-                marker_width = self._list_marker_font(marker).measure(marker.label) + 2
-                prefix_width = list_font.measure(surrounding_text) + marker_width
-            wrap_margin = LIST_FIRST_LINE_MARGIN + prefix_width
+            preview_is_mounted = self.hide_markers.get() and not marker_on_active_line
+            first_line_margin, wrap_margin = _list_layout_margins(
+                list_font.measure(indentation),
+                list_font.measure(spacing),
+                source_marker_width,
+                self._list_marker_column_width,
+                preview_is_mounted=preview_is_mounted,
+            )
             tag = f"list_wrap_{marker_index}"
             self.editor.tag_configure(
                 tag,
-                lmargin1=LIST_FIRST_LINE_MARGIN,
+                lmargin1=first_line_margin,
                 lmargin2=wrap_margin,
             )
             self.editor.tag_add(
@@ -1361,17 +1387,31 @@ class MarkdownQuickMemoApp:
         line.pack(fill="x", pady=8)
         return container
 
-    def _create_list_marker_widget(self, marker: ListMarker) -> tk.Label:
-        return tk.Label(
+    def _create_list_marker_widget(self, marker: ListMarker) -> tk.Frame:
+        marker_font = self._list_marker_font(marker)
+        container = tk.Frame(
             self.editor,
+            background="#ffffff",
+            borderwidth=0,
+            width=max(1, self._list_marker_column_width),
+            height=max(
+                self._list_source_marker_font.metrics("linespace"),
+                marker_font.metrics("linespace"),
+            ),
+        )
+        container.pack_propagate(False)
+        label = tk.Label(
+            container,
             text=marker.label,
             background="#ffffff",
             foreground="#111827",
             borderwidth=0,
-            font=self._list_marker_font(marker),
-            padx=1,
+            font=marker_font,
+            padx=0,
             pady=0,
         )
+        label.place(relx=1.0, rely=0.5, anchor="e")
+        return container
 
     def _list_marker_font(self, marker: ListMarker) -> tkfont.Font:
         if marker.ordered:
