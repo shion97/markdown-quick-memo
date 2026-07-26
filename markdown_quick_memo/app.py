@@ -363,8 +363,16 @@ class MarkdownQuickMemoApp:
         file_menu.add_separator()
         file_menu.add_command(label="上書き保存", accelerator="Ctrl+S", command=self.save)
         file_menu.add_command(label="名前を付けて保存...", accelerator="Ctrl+Shift+S", command=self.save_as)
-        file_menu.add_command(label="ファイル名を変更...", command=self.rename_current_file)
-        file_menu.add_command(label="保存先をエクスプローラーで開く", command=self.open_save_folder)
+        file_menu.add_command(
+            label="ファイル名を変更...",
+            accelerator="F2",
+            command=self.rename_current_file,
+        )
+        file_menu.add_command(
+            label="保存先をエクスプローラーで開く",
+            accelerator="Ctrl+Shift+E",
+            command=self.open_save_folder,
+        )
         file_menu.add_separator()
         file_menu.add_command(
             label="PDFに書き出す",
@@ -467,6 +475,11 @@ class MarkdownQuickMemoApp:
                 weight="bold",
             ),
         }
+        self._list_source_marker_font = self._create_font(
+            self._latin_font_family,
+            11,
+            weight="bold",
+        )
         self.editor.tag_configure("list_marker", foreground=colors["foreground"], font=bold)
         self.editor.tag_configure("checkbox", foreground=colors["muted"])
         self.editor.tag_configure("checkbox_checked", foreground="#15803d", overstrike=True)
@@ -601,6 +614,8 @@ class MarkdownQuickMemoApp:
             "<Control-o>": self.open_document,
             "<Control-s>": self.save,
             "<Control-Shift-S>": self.save_as,
+            "<F2>": self.rename_current_file,
+            "<Control-Shift-E>": self.open_save_folder,
             "<Control-q>": self.close,
             "<Control-f>": self.show_search,
             "<Control-t>": self.show_table_dialog,
@@ -1060,8 +1075,14 @@ class MarkdownQuickMemoApp:
             )
             marker_is_visible = not self.hide_markers.get() or marker_on_active_line
             if marker_is_visible:
-                prefix_width = list_font.measure(
-                    text[line_start : marker.content_start].expandtabs(4)
+                surrounding_text = (
+                    text[line_start : marker.start]
+                    + text[marker.end : marker.content_start]
+                ).expandtabs(4)
+                source_marker = text[marker.start : marker.end]
+                prefix_width = (
+                    list_font.measure(surrounding_text)
+                    + self._list_source_marker_font.measure(source_marker)
                 )
             else:
                 surrounding_text = (

@@ -240,6 +240,27 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("PDFに書き出す", file_labels)
         self.assertIn("ファイル名を変更...", file_labels)
         self.assertIn("保存先をエクスプローラーで開く", file_labels)
+        file_menu_indices = {
+            file_menu.entrycget(index, "label"): index
+            for index in range(file_menu.index("end") + 1)
+            if file_menu.type(index) != "separator"
+        }
+        self.assertEqual(
+            file_menu.entrycget(
+                file_menu_indices["ファイル名を変更..."],
+                "accelerator",
+            ),
+            "F2",
+        )
+        self.assertEqual(
+            file_menu.entrycget(
+                file_menu_indices["保存先をエクスプローラーで開く"],
+                "accelerator",
+            ),
+            "Ctrl+Shift+E",
+        )
+        self.assertTrue(self.root.bind("<F2>"))
+        self.assertTrue(self.root.bind("<Control-Shift-E>"))
         self.assertTrue(self.root.bind("<Control-t>"))
         self.assertTrue(self.root.bind("<Control-Shift-P>"))
         self.assertTrue(self.root.bind("<Control-Shift-O>"))
@@ -280,9 +301,14 @@ class GuiSmokeTests(unittest.TestCase):
         list_font = tkfont.nametofont("TkTextFont")
         bullet_font = self.app._list_marker_fonts["bullet"]
         expected_first_margin = 12 + bullet_font.measure("●") + 2 + list_font.measure(" ")
+        expected_nested_margin = (
+            12
+            + list_font.measure("   ")
+            + self.app._list_source_marker_font.measure("10.")
+        )
 
         self.assertEqual(first_margin, expected_first_margin)
-        self.assertGreater(nested_margin, first_margin)
+        self.assertEqual(nested_margin, expected_nested_margin)
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:
         self.app._replace_text("- item")

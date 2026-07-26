@@ -41,6 +41,27 @@ class AppFileActionTests(unittest.TestCase):
         self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("3)"), "1.")
         self.assertEqual(MarkdownQuickMemoApp._continuation_list_marker("-"), "-")
 
+    def test_file_action_shortcuts_are_bound(self) -> None:
+        app = MarkdownQuickMemoApp.__new__(MarkdownQuickMemoApp)
+        app.root = Mock()
+        app.editor = Mock()
+
+        app._bind_shortcuts()
+
+        root_bindings = {
+            call.args[0]: call.args[1]
+            for call in app.root.bind.call_args_list
+            if len(call.args) >= 2
+        }
+        self.assertEqual(
+            root_bindings["<F2>"].__func__,
+            MarkdownQuickMemoApp.rename_current_file,
+        )
+        self.assertEqual(
+            root_bindings["<Control-Shift-E>"].__func__,
+            MarkdownQuickMemoApp.open_save_folder,
+        )
+
     def test_save_folder_and_exported_pdf_open_with_default_app(self) -> None:
         with TemporaryDirectory() as directory:
             markdown_path = Path(directory) / "memo.md"
