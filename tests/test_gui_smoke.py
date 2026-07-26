@@ -238,6 +238,8 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertEqual(labels, ["ファイル", "編集"])
         self.assertIn("PDFに書き出す", file_labels)
+        self.assertIn("ファイル名を変更...", file_labels)
+        self.assertIn("保存先をエクスプローラーで開く", file_labels)
         self.assertTrue(self.root.bind("<Control-t>"))
         self.assertTrue(self.root.bind("<Control-Shift-P>"))
         self.assertTrue(self.root.bind("<Control-Shift-O>"))
@@ -266,6 +268,16 @@ class GuiSmokeTests(unittest.TestCase):
 
                 self.assertEqual(result, "break")
                 self.assertEqual(self.app.editor.get("1.0", "end-1c"), expected)
+
+    def test_wrapped_list_lines_align_with_item_content(self) -> None:
+        self.app._replace_text("- first\n  10. nested")
+        self.app.render_markdown()
+
+        first_margin = int(self.app.editor.tag_cget("list_wrap_0", "lmargin2"))
+        nested_margin = int(self.app.editor.tag_cget("list_wrap_1", "lmargin2"))
+
+        self.assertGreater(first_margin, 12)
+        self.assertGreater(nested_margin, first_margin)
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:
         self.app._replace_text("- item")
@@ -355,16 +367,42 @@ class GuiSmokeTests(unittest.TestCase):
             self.app._on_modified()
             pdf_path = markdown_path.with_suffix(".pdf")
 
-            with patch(
-                "markdown_quick_memo.pdf_exporter.export_markdown_to_pdf",
-                return_value=pdf_path,
-            ) as exporter:
+            with (
+                patch(
+                    "markdown_quick_memo.pdf_exporter.export_markdown_to_pdf",
+                    return_value=pdf_path,
+                ) as exporter,
+                patch("markdown_quick_memo.app.open_with_default_app") as opener,
+            ):
                 result = self.app.export_pdf()
 
             self.assertEqual(result, "break")
             self.assertEqual(markdown_path.read_text(encoding="utf-8"), "# PDF\n更新")
             exporter.assert_called_once_with("# PDF\n更新", markdown_path.resolve(), pdf_path.resolve())
+            opener.assert_called_once_with(pdf_path)
             self.assertIn("PDFを書き出しました", self.app.status_text.get())
+
+    def test_current_file_can_be_renamed_and_its_folder_opened(self) -> None:
+        with TemporaryDirectory() as directory:
+            markdown_path = Path(directory) / "memo.md"
+            self.app._replace_text("memo")
+            self.app._save_to(markdown_path)
+
+            with patch(
+                "markdown_quick_memo.app.simpledialog.askstring",
+                return_value="renamed.md",
+            ):
+                self.assertEqual(self.app.rename_current_file(), "break")
+
+            renamed_path = Path(directory) / "renamed.md"
+            self.assertFalse(markdown_path.exists())
+            self.assertTrue(renamed_path.exists())
+            self.assertEqual(self.app.current_path, renamed_path.resolve())
+
+            with patch("markdown_quick_memo.app.open_with_default_app") as opener:
+                self.assertEqual(self.app.open_save_folder(), "break")
+
+            opener.assert_called_once_with(renamed_path.resolve().parent)
 
     def test_window_transparency_can_be_toggled(self) -> None:
         self.assertFalse(self.app.transparent_mode.get())

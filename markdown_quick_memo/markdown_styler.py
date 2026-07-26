@@ -45,6 +45,7 @@ class TableBlock:
 class ListMarker:
     start: int
     end: int
+    content_start: int
     label: str
     depth: int
     ordered: bool
@@ -482,7 +483,16 @@ def analyze_markdown(text: str) -> MarkdownAnalysis:
 
             analysis.spans.append(StyleSpan(line_start, line_end, "list_item"))
             analysis.spans.append(StyleSpan(marker_start, marker_end, "list_marker"))
-            analysis.list_markers.append(ListMarker(marker_start, marker_end, preview_label, depth, ordered))
+            analysis.list_markers.append(
+                ListMarker(
+                    marker_start,
+                    marker_end,
+                    line_start + list_item.end(),
+                    preview_label,
+                    depth,
+                    ordered,
+                )
+            )
             previous_was_list = True
         else:
             previous_was_list = False

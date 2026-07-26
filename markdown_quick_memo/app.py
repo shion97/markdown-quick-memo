@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 from threading import Thread
 import tkinter as tk
-from tkinter import filedialog, font as tkfont, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 import webbrowser
 
 from .document import read_markdown, write_markdown
@@ -76,6 +76,7 @@ MAX_TABLE_DIMENSION = 100
 OPAQUE_WINDOW_ALPHA = 1.0
 TRANSLUCENT_WINDOW_ALPHA = 0.6
 LIST_INDENT = "  "
+LIST_FIRST_LINE_MARGIN = 12
 TYPING_LIST_PATTERN = re.compile(r"^(\s*)([-+*]|\d+[.)])([ \t]+)(.*)$")
 TYPING_TASK_PATTERN = re.compile(r"^\[([ xX])\]([ \t]+)(.*)$")
 TYPING_QUOTE_PATTERN = re.compile(r"^( {0,3})((?:> ?)*>)[ ](.*)$")
@@ -89,6 +90,15 @@ PAIR_CHARACTERS = {
     "`": "`",
 }
 CLOSING_PAIR_CHARACTERS = frozenset(PAIR_CHARACTERS.values())
+
+
+def open_with_default_app(path: Path) -> None:
+    """Open a file or folder with the Windows default application."""
+
+    startfile = getattr(os, "startfile", None)
+    if startfile is None:
+        raise OSError("既定のアプリで開く機能はWindowsでのみ利用できます。")
+    startfile(str(path))
 
 
 def build_table_template(row_count: int, column_count: int) -> str:
@@ -353,6 +363,8 @@ class MarkdownQuickMemoApp:
         file_menu.add_separator()
         file_menu.add_command(label="上書き保存", accelerator="Ctrl+S", command=self.save)
         file_menu.add_command(label="名前を付けて保存...", accelerator="Ctrl+Shift+S", command=self.save_as)
+        file_menu.add_command(label="ファイル名を変更...", command=self.rename_current_file)
+        file_menu.add_command(label="保存先をエクスプローラーで開く", command=self.open_save_folder)
         file_menu.add_separator()
         file_menu.add_command(
             label="PDFに書き出す",
@@ -433,7 +445,11 @@ class MarkdownQuickMemoApp:
             lmargin2=8,
         )
         self.editor.tag_configure("quote_marker", foreground=QUOTE_BAR_COLOR, font=bold)
-        self.editor.tag_configure("list_item", lmargin1=12, lmargin2=28)
+        self.editor.tag_configure(
+            "list_item",
+            lmargin1=LIST_FIRST_LINE_MARGIN,
+            lmargin2=LIST_FIRST_LINE_MARGIN,
+        )
         self.editor.tag_configure("list_marker", foreground=colors["foreground"], font=bold)
         self.editor.tag_configure("checkbox", foreground=colors["muted"])
         self.editor.tag_configure("checkbox_checked", foreground="#15803d", overstrike=True)
@@ -967,6 +983,7 @@ class MarkdownQuickMemoApp:
                 self._tag_add_ranges(tag, ranges)
             self._tag_add_ranges("marker_concealable", concealable_ranges)
             self._tag_add_ranges("marker_hidden", hidden_ranges)
+            self._apply_list_wrap_indents(text)
 
             self._apply_script_fonts(text)
 
@@ -1003,6 +1020,29 @@ class MarkdownQuickMemoApp:
             self.editor.edit_modified(False)
         finally:
             self._rendering = False
+
+    def _apply_list_wrap_indents(self, text: str) -> None:
+        """Align wrapped list lines with the first character of the item body."""
+
+        list_font = tkfont.nametofont("TkTextFont")
+        for marker_index, marker in enumerate(self._analysis.list_markers):
+            line_start = text.rfind("\n", 0, marker.start) + 1
+            line_end = text.find("\n", marker.content_start)
+            if line_end < 0:
+                line_end = len(text)
+            prefix = text[line_start : marker.content_start].expandtabs(4)
+            wrap_margin = LIST_FIRST_LINE_MARGIN + list_font.measure(prefix)
+            tag = f"list_wrap_{marker_index}"
+            self.editor.tag_configure(
+                tag,
+                lmargin1=LIST_FIRST_LINE_MARGIN,
+                lmargin2=wrap_margin,
+            )
+            self.editor.tag_add(
+                tag,
+                self._text_index_mapper.index(line_start),
+                self._text_index_mapper.index(line_end),
+            )
 
     def _refresh_active_line(self, previous_line: int) -> None:
         if self._rendering:
@@ -1790,6 +1830,75 @@ class MarkdownQuickMemoApp:
         self._update_title_and_status(message="保存しました")
         return self.current_path
 
+    def rename_current_file(self, _event: tk.Event | None = None) -> str:
+        if self.current_path is None:
+            self.save_as()
+            return self._break()
+        if self.dirty and self.save() is None:
+            return self._break()
+
+        current_path = self.current_path
+        new_name = simpledialog.askstring(
+            APP_NAME,
+            "新しいファイル名を入力してください。",
+            initialvalue=current_path.name,
+            parent=self.root,
+        )
+        if new_name is None:
+            return self._break()
+        new_name = new_name.strip()
+        if not new_name or new_name in {".", ".."} or Path(new_name).name != new_name:
+            messagebox.showerror(
+                APP_NAME,
+                "フォルダ名を含まない有効なファイル名を入力してください。",
+                parent=self.root,
+            )
+            return self._break()
+        if Path(new_name).suffix == "":
+            new_name += current_path.suffix or ".md"
+
+        renamed_path = current_path.with_name(new_name)
+        if renamed_path == current_path:
+            return self._break()
+        if renamed_path.exists():
+            messagebox.showerror(
+                APP_NAME,
+                f"{renamed_path.name} は既に存在します。",
+                parent=self.root,
+            )
+            return self._break()
+        try:
+            current_path.rename(renamed_path)
+        except OSError as error:
+            messagebox.showerror(
+                APP_NAME,
+                f"ファイル名を変更できませんでした。\n\n{error}",
+                parent=self.root,
+            )
+            return self._break()
+
+        self.current_path = renamed_path.resolve()
+        self._update_title_and_status(message=f"ファイル名を変更しました: {renamed_path.name}")
+        return self._break()
+
+    def open_save_folder(self, _event: tk.Event | None = None) -> str:
+        if self.current_path is None:
+            messagebox.showinfo(
+                APP_NAME,
+                "先にMarkdownファイルを保存してください。",
+                parent=self.root,
+            )
+            return self._break()
+        try:
+            open_with_default_app(self.current_path.parent)
+        except OSError as error:
+            messagebox.showerror(
+                APP_NAME,
+                f"保存先を開けませんでした。\n\n{error}",
+                parent=self.root,
+            )
+        return self._break()
+
     def export_pdf(self, _event: tk.Event | None = None) -> str:
         if self.current_path is None or self.dirty:
             markdown_path = self.save()
@@ -1823,6 +1932,14 @@ class MarkdownQuickMemoApp:
             return self._break()
 
         self._update_title_and_status(message=f"PDFを書き出しました: {exported_path.name}")
+        try:
+            open_with_default_app(exported_path)
+        except OSError as error:
+            messagebox.showwarning(
+                APP_NAME,
+                f"PDFは生成しましたが、自動で開けませんでした。\n\n{error}",
+                parent=self.root,
+            )
         return self._break()
 
     def close(self, _event: tk.Event | None = None) -> str:

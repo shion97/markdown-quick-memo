@@ -108,6 +108,10 @@ class MarkdownStylerTests(unittest.TestCase):
             ["1.", "2.", "○", "○", "3.", "1.", "2.", "○"],
         )
         self.assertEqual([marker.depth for marker in markers], [0, 0, 1, 1, 0, 1, 1, 2])
+        self.assertEqual(
+            [text[marker.content_start] for marker in markers],
+            ["1", "2", "子", "子", "3", "子", "子", "孫"],
+        )
 
     def test_inline_and_display_math_are_detected(self) -> None:
         text = "インライン $E=mc^2$ です。\n\n$$\\frac{a}{b} = \\sqrt{x}$$"
