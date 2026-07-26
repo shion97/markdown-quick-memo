@@ -62,24 +62,41 @@ class AppFileActionTests(unittest.TestCase):
             MarkdownQuickMemoApp.open_save_folder,
         )
 
-    def test_list_layout_right_aligns_source_marker_in_common_column(self) -> None:
+    def test_list_layout_stays_aligned_between_source_and_preview_markers(self) -> None:
         source_marker_width = 7
         marker_column_width = 18
         spacing_width = 5
         indentation_width = 10
 
-        first_margin, wrap_margin = _list_layout_margins(
+        source_first_margin, source_wrap_margin = _list_layout_margins(
             indentation_width,
             spacing_width,
             source_marker_width,
             marker_column_width,
+            preview_is_mounted=False,
         )
+        preview_first_margin, preview_wrap_margin = _list_layout_margins(
+            indentation_width,
+            spacing_width,
+            source_marker_width,
+            marker_column_width,
+            preview_is_mounted=True,
+        )
+
+        self.assertEqual(source_wrap_margin, preview_wrap_margin)
         self.assertEqual(
-            first_margin
+            source_first_margin
             + indentation_width
             + source_marker_width
             + spacing_width,
-            wrap_margin,
+            source_wrap_margin,
+        )
+        self.assertEqual(
+            preview_first_margin
+            + indentation_width
+            + marker_column_width
+            + spacing_width,
+            preview_wrap_margin,
         )
 
     def test_save_folder_and_exported_pdf_open_with_default_app(self) -> None:

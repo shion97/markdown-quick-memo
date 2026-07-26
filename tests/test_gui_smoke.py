@@ -64,7 +64,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("heading1", self.app.editor.tag_names())
         self.assertIn("marker_hidden", self.app.editor.tag_names())
         self.assertEqual(len(self.app._analysis.links), 1)
-        self.assertEqual(len(self.app._decoration_widgets), 4)
+        self.assertEqual(len(self.app._decoration_widgets), 5)
         self.assertTrue(
             all(
                 widget.bind("<MouseWheel>") and widget.bind("<Button-1>")
@@ -93,13 +93,13 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 4)
+        self.assertEqual(len(self.app._decoration_widgets), 5)
 
         table_index = self.app.editor.search("| 名前", "1.0", stopindex="end", elide=True)
         self.app.editor.mark_set("insert", table_index)
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 3)
+        self.assertEqual(len(self.app._decoration_widgets), 4)
 
     def test_resident_window_can_hide_without_discarding_document(self) -> None:
         resident_root = tk.Tk()
@@ -152,37 +152,44 @@ class GuiSmokeTests(unittest.TestCase):
                 self.assertLess(wrap_offset, len(markdown))
                 self.assertGreater(wrap_offset, premature_wrap_offset)
 
-    def test_list_markers_keep_source_text_when_cursor_moves(self) -> None:
+    def test_list_preview_uses_sequential_and_nested_markers(self) -> None:
         markdown = "1. 1番目\n1. 2番目\n   - 子要素\n   1. 子番号\n\nカーソル行"
         self.app._replace_text(markdown)
         self.app.editor.mark_set("insert", "end-1c")
         self.app.render_markdown()
+        self.root.update_idletasks()
 
-        self.assertNotIn(
-            "list_marker",
-            [record.decoration_type for record in self.app._decoration_records],
+        marker_canvases = [
+            record.widget
+            for record in self.app._decoration_records
+            if record.decoration_type == "list_marker"
+        ]
+        self.assertTrue(
+            all(isinstance(canvas, tk.Canvas) for canvas in marker_canvases)
         )
-        for marker in self.app._analysis.list_markers:
-            marker_start = self.app._text_index_mapper.index(marker.start)
-            marker_end = self.app._text_index_mapper.index(marker.end)
-            self.assertEqual(
-                self.app.editor.get(marker_start, marker_end),
-                marker.source,
+        preview_labels = [
+            canvas.itemcget(item, "text")
+            for canvas in marker_canvases
+            for item in canvas.find_withtag("list_marker_label")
+        ]
+        self.assertCountEqual(preview_labels, ["1.", "2.", "○", "1."])
+        bullet_canvas = next(
+            canvas
+            for canvas in marker_canvases
+            if any(
+                canvas.itemcget(item, "text") == "○"
+                for item in canvas.find_withtag("list_marker_label")
             )
-            self.assertNotIn(
-                "marker_hidden",
-                self.app.editor.tag_names(marker_start),
-            )
-
-        self.app.editor.mark_set("insert", "1.2")
-        self.app._refresh_active_line(previous_line=6)
-
-        for marker in self.app._analysis.list_markers:
-            marker_start = self.app._text_index_mapper.index(marker.start)
-            self.assertNotIn(
-                "marker_hidden",
-                self.app.editor.tag_names(marker_start),
-            )
+        )
+        bullet_item = bullet_canvas.find_withtag("list_marker_label")[0]
+        bullet_font = tkfont.Font(font=bullet_canvas.itemcget(bullet_item, "font"))
+        self.assertEqual(bullet_font.actual("size"), 6)
+        self.assertEqual(int(bullet_canvas.cget("borderwidth")), 0)
+        self.assertEqual(int(bullet_canvas.cget("highlightthickness")), 0)
+        self.assertEqual(
+            bullet_canvas.winfo_reqwidth(),
+            self.app._list_marker_column_width,
+        )
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
 
     def test_quote_preview_uses_nested_bars_and_lazy_continuation(self) -> None:
@@ -317,6 +324,8 @@ class GuiSmokeTests(unittest.TestCase):
         marker_column_width = max(
             source_font.measure("-"),
             source_font.measure("10."),
+            self.app._list_marker_fonts["bullet"].measure("●"),
+            self.app._list_marker_fonts["ordered"].measure("10."),
         )
         expected_first_margin = 12 + list_font.measure(" ") + marker_column_width
         expected_nested_margin = 12 + list_font.measure("   ") + marker_column_width
@@ -328,7 +337,7 @@ class GuiSmokeTests(unittest.TestCase):
             list_font.measure("  "),
         )
         self.assertEqual(
-            first_line_margin + source_font.measure("-") + list_font.measure(" "),
+            first_line_margin + marker_column_width + list_font.measure(" "),
             first_margin,
         )
         self.assertEqual(
@@ -351,57 +360,129 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(
             moved_nested_margin
             + list_font.measure("  ")
-            + source_font.measure("10.")
+            + marker_column_width
             + list_font.measure(" "),
             nested_margin,
         )
 
-    def test_list_layout_stays_stable_after_edit_and_cursor_navigation(self) -> None:
-        self.app._replace_text("- " + "a" * 120 + "\n  10. nested\nカーソル行")
-        self.app.editor.mark_set("insert", "1.0 lineend")
-        self.app.render_markdown()
-        original_margins = (
-            self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
-            self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
+    def test_list_rendered_coordinates_stay_stable_across_edit_states(self) -> None:
+        self.root.minsize(640, 620)
+        self.root.geometry("640x620+10000+10000")
+        self.root.deiconify()
+        markdown = (
+            "- " + "a" * 110 + "\n"
+            + "  1. " + "b" * 110 + "\n"
+            + "  10. " + "c" * 110 + "\n"
+            + "カーソル行"
         )
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "4.0")
+        self.app.render_markdown()
+        self.root.update()
 
+        def body_and_wrap_x(needle: str) -> tuple[int, int]:
+            body_index = self.app.editor.search(
+                needle,
+                "1.0",
+                stopindex="end",
+                elide=True,
+            )
+            self.assertTrue(body_index)
+            body_bounds = self.app.editor.bbox(body_index)
+            second_display_index = self.app.editor.index(
+                f"{body_index} + 1 display lines"
+            )
+            wrap_line_info = self.app.editor.dlineinfo(second_display_index)
+            self.assertIsNotNone(body_bounds)
+            self.assertIsNotNone(wrap_line_info)
+            return body_bounds[0], wrap_line_info[0]
+
+        def preview_marker_right_edges() -> list[int]:
+            edges: list[int] = []
+            marker_records = [
+                record
+                for record in self.app._decoration_records
+                if record.decoration_type == "list_marker"
+            ]
+            self.assertEqual(len(marker_records), 3)
+            for record in marker_records:
+                self.assertIsInstance(record.widget, tk.Canvas)
+                widget_index = self.app.editor.index(str(record.widget))
+                widget_bounds = self.app.editor.bbox(widget_index)
+                self.assertIsNotNone(widget_bounds)
+                edges.append(widget_bounds[0] + widget_bounds[2])
+            return edges
+
+        needles = ("a" * 8, "b" * 8, "c" * 8)
+        preview_coordinates = {
+            needle: body_and_wrap_x(needle)
+            for needle in needles
+        }
+        preview_edges = preview_marker_right_edges()
+        for body_x, wrap_x in preview_coordinates.values():
+            self.assertEqual(body_x, wrap_x)
+
+        for line_number, needle, expected_marker_edge in zip(
+            (1, 2, 3),
+            needles,
+            preview_edges,
+            strict=True,
+        ):
+            self.app.editor.mark_set("insert", f"{line_number}.0 lineend")
+            self.app._on_cursor_moved()
+            self.root.update()
+
+            self.assertEqual(
+                body_and_wrap_x(needle),
+                preview_coordinates[needle],
+            )
+            marker = self.app._analysis.list_markers[line_number - 1]
+            marker_index = self.app.editor.search(
+                marker.source,
+                f"{line_number}.0",
+                stopindex=f"{line_number}.0 lineend",
+                elide=True,
+            )
+            marker_last_index = self.app.editor.index(
+                f"{marker_index} + {len(marker.source) - 1}c"
+            )
+            marker_bounds = self.app.editor.bbox(marker_last_index)
+            self.assertIsNotNone(marker_bounds)
+            self.assertEqual(
+                marker_bounds[0] + marker_bounds[2],
+                expected_marker_edge,
+                (
+                    f"line={line_number}, source={marker.source}, "
+                    f"marker_bounds={marker_bounds}, "
+                    f"expected_edge={expected_marker_edge}"
+                ),
+            )
+
+            self.app.editor.mark_set("insert", "4.0")
+            self.app._on_cursor_moved()
+            self.root.update()
+            self.assertEqual(
+                body_and_wrap_x(needle),
+                preview_coordinates[needle],
+            )
+
+        self.app.editor.mark_set("insert", "1.0 lineend")
+        self.app._on_cursor_moved()
         self.assertEqual(self.app._on_return(), "break")
         self.app.render_markdown()
+        self.root.update()
         self.assertEqual(
-            (
-                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
-                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
-            ),
-            original_margins,
+            body_and_wrap_x(needles[0]),
+            preview_coordinates[needles[0]],
         )
 
         self.app.editor.insert("insert", "x")
         self.app.editor.delete("insert -1c", "insert")
         self.app.render_markdown()
+        self.root.update()
         self.assertEqual(
-            (
-                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
-                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
-            ),
-            original_margins,
-        )
-
-        previous_line = int(self.app.editor.index("insert").split(".")[0])
-        self.app.editor.mark_set("insert", "end-1c")
-        self.app._refresh_active_line(previous_line=previous_line)
-        first_marker_start = self.app._text_index_mapper.index(
-            self.app._analysis.list_markers[0].start
-        )
-        self.assertNotIn(
-            "marker_hidden",
-            self.app.editor.tag_names(first_marker_start),
-        )
-        self.assertEqual(
-            (
-                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
-                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
-            ),
-            original_margins,
+            body_and_wrap_x(needles[0]),
+            preview_coordinates[needles[0]],
         )
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:
