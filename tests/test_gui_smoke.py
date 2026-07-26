@@ -64,7 +64,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("heading1", self.app.editor.tag_names())
         self.assertIn("marker_hidden", self.app.editor.tag_names())
         self.assertEqual(len(self.app._analysis.links), 1)
-        self.assertEqual(len(self.app._decoration_widgets), 5)
+        self.assertEqual(len(self.app._decoration_widgets), 4)
         self.assertTrue(
             all(
                 widget.bind("<MouseWheel>") and widget.bind("<Button-1>")
@@ -93,13 +93,13 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 5)
+        self.assertEqual(len(self.app._decoration_widgets), 4)
 
         table_index = self.app.editor.search("| 名前", "1.0", stopindex="end", elide=True)
         self.app.editor.mark_set("insert", table_index)
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 4)
+        self.assertEqual(len(self.app._decoration_widgets), 3)
 
     def test_resident_window_can_hide_without_discarding_document(self) -> None:
         resident_root = tk.Tk()
@@ -152,27 +152,37 @@ class GuiSmokeTests(unittest.TestCase):
                 self.assertLess(wrap_offset, len(markdown))
                 self.assertGreater(wrap_offset, premature_wrap_offset)
 
-    def test_list_preview_uses_sequential_and_nested_markers(self) -> None:
+    def test_list_markers_keep_source_text_when_cursor_moves(self) -> None:
         markdown = "1. 1番目\n1. 2番目\n   - 子要素\n   1. 子番号\n\nカーソル行"
         self.app._replace_text(markdown)
         self.app.editor.mark_set("insert", "end-1c")
         self.app.render_markdown()
 
-        marker_labels = [
-            descendant
-            for widget in self.app._decoration_widgets
-            for descendant in _descendants(widget)
-            if isinstance(descendant, tk.Label) and descendant.cget("text")
-        ]
-        preview_labels = [label.cget("text") for label in marker_labels]
-        self.assertCountEqual(preview_labels, ["1.", "2.", "○", "1."])
-        bullet_widget = next(
-            label
-            for label in marker_labels
-            if label.cget("text") == "○"
+        self.assertNotIn(
+            "list_marker",
+            [record.decoration_type for record in self.app._decoration_records],
         )
-        bullet_font = tkfont.Font(font=bullet_widget.cget("font"))
-        self.assertEqual(bullet_font.actual("size"), 6)
+        for marker in self.app._analysis.list_markers:
+            marker_start = self.app._text_index_mapper.index(marker.start)
+            marker_end = self.app._text_index_mapper.index(marker.end)
+            self.assertEqual(
+                self.app.editor.get(marker_start, marker_end),
+                marker.source,
+            )
+            self.assertNotIn(
+                "marker_hidden",
+                self.app.editor.tag_names(marker_start),
+            )
+
+        self.app.editor.mark_set("insert", "1.2")
+        self.app._refresh_active_line(previous_line=6)
+
+        for marker in self.app._analysis.list_markers:
+            marker_start = self.app._text_index_mapper.index(marker.start)
+            self.assertNotIn(
+                "marker_hidden",
+                self.app.editor.tag_names(marker_start),
+            )
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
 
     def test_quote_preview_uses_nested_bars_and_lazy_continuation(self) -> None:
@@ -307,8 +317,6 @@ class GuiSmokeTests(unittest.TestCase):
         marker_column_width = max(
             source_font.measure("-"),
             source_font.measure("10."),
-            self.app._list_marker_fonts["bullet"].measure("●"),
-            self.app._list_marker_fonts["ordered"].measure("10."),
         )
         expected_first_margin = 12 + list_font.measure(" ") + marker_column_width
         expected_nested_margin = 12 + list_font.measure("   ") + marker_column_width
@@ -320,7 +328,7 @@ class GuiSmokeTests(unittest.TestCase):
             list_font.measure("  "),
         )
         self.assertEqual(
-            first_line_margin + marker_column_width + list_font.measure(" "),
+            first_line_margin + source_font.measure("-") + list_font.measure(" "),
             first_margin,
         )
         self.assertEqual(
@@ -343,9 +351,57 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(
             moved_nested_margin
             + list_font.measure("  ")
-            + marker_column_width
+            + source_font.measure("10.")
             + list_font.measure(" "),
             nested_margin,
+        )
+
+    def test_list_layout_stays_stable_after_edit_and_cursor_navigation(self) -> None:
+        self.app._replace_text("- " + "a" * 120 + "\n  10. nested\nカーソル行")
+        self.app.editor.mark_set("insert", "1.0 lineend")
+        self.app.render_markdown()
+        original_margins = (
+            self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
+            self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
+        )
+
+        self.assertEqual(self.app._on_return(), "break")
+        self.app.render_markdown()
+        self.assertEqual(
+            (
+                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
+                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
+            ),
+            original_margins,
+        )
+
+        self.app.editor.insert("insert", "x")
+        self.app.editor.delete("insert -1c", "insert")
+        self.app.render_markdown()
+        self.assertEqual(
+            (
+                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
+                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
+            ),
+            original_margins,
+        )
+
+        previous_line = int(self.app.editor.index("insert").split(".")[0])
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app._refresh_active_line(previous_line=previous_line)
+        first_marker_start = self.app._text_index_mapper.index(
+            self.app._analysis.list_markers[0].start
+        )
+        self.assertNotIn(
+            "marker_hidden",
+            self.app.editor.tag_names(first_marker_start),
+        )
+        self.assertEqual(
+            (
+                self.app.editor.tag_cget("list_wrap_0", "lmargin1"),
+                self.app.editor.tag_cget("list_wrap_0", "lmargin2"),
+            ),
+            original_margins,
         )
 
     def test_tab_and_shift_enter_support_structured_typing(self) -> None:

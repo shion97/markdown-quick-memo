@@ -26,7 +26,6 @@ from .font_support import (
 )
 from .markdown_styler import (
     LinkReference,
-    ListMarker,
     MarkdownAnalysis,
     MathExpression,
     QuoteBlock,
@@ -42,9 +41,6 @@ DEFAULT_GEOMETRY = "760x620"
 RENDER_DELAY_MS = 140
 EDITOR_SCROLL_PIXELS_PER_NOTCH = 48
 WINDOWS_MOUSE_WHEEL_DELTA = 120
-LIST_BULLET_FONT_SIZE = 9
-LIST_HOLLOW_BULLET_FONT_SIZE = 6
-LIST_NUMBER_FONT_SIZE = 10
 TABLE_LINE_COLOR = "#94a3b8"
 TABLE_LINE_WIDTH = 1
 TABLE_STRONG_LINE_WIDTH = TABLE_LINE_WIDTH * 2
@@ -106,12 +102,12 @@ def _list_layout_margins(
     spacing_width: int,
     source_marker_width: int,
     marker_column_width: int,
-    *,
-    preview_is_mounted: bool,
 ) -> tuple[int, int]:
-    first_line_margin = LIST_FIRST_LINE_MARGIN
-    if not preview_is_mounted:
-        first_line_margin += marker_column_width - source_marker_width
+    first_line_margin = (
+        LIST_FIRST_LINE_MARGIN
+        + marker_column_width
+        - source_marker_width
+    )
     wrap_margin = (
         LIST_FIRST_LINE_MARGIN
         + indentation_width
@@ -199,7 +195,6 @@ class MarkdownQuickMemoApp:
         self._character_count = 0
         self._word_count = 0
         self._document_statistics_dirty = True
-        self._list_marker_column_width = 0
 
         self._configure_named_fonts()
         self._configure_window()
@@ -479,29 +474,16 @@ class MarkdownQuickMemoApp:
             lmargin1=LIST_FIRST_LINE_MARGIN,
             lmargin2=LIST_FIRST_LINE_MARGIN,
         )
-        self._list_marker_fonts = {
-            "ordered": self._create_font(
-                self._latin_font_family,
-                LIST_NUMBER_FONT_SIZE,
-                weight="bold",
-            ),
-            "hollow": self._create_font(
-                self._latin_font_family,
-                LIST_HOLLOW_BULLET_FONT_SIZE,
-                weight="bold",
-            ),
-            "bullet": self._create_font(
-                self._latin_font_family,
-                LIST_BULLET_FONT_SIZE,
-                weight="bold",
-            ),
-        }
         self._list_source_marker_font = self._create_font(
             self._latin_font_family,
             11,
             weight="bold",
         )
-        self.editor.tag_configure("list_marker", foreground=colors["foreground"], font=bold)
+        self.editor.tag_configure(
+            "list_marker",
+            foreground=colors["foreground"],
+            font=self._list_source_marker_font,
+        )
         self.editor.tag_configure("checkbox", foreground=colors["muted"])
         self.editor.tag_configure("checkbox_checked", foreground="#15803d", overstrike=True)
         self.editor.tag_configure("horizontal_rule", foreground=colors["muted"], justify="center")
@@ -1035,11 +1017,7 @@ class MarkdownQuickMemoApp:
                 self._tag_add_ranges(tag, ranges)
             self._tag_add_ranges("marker_concealable", concealable_ranges)
             self._tag_add_ranges("marker_hidden", hidden_ranges)
-            self._apply_list_wrap_indents(
-                text,
-                active_line_start_offset,
-                active_line_end_offset,
-            )
+            self._apply_list_wrap_indents(text)
 
             self._apply_script_fonts(text)
 
@@ -1080,8 +1058,6 @@ class MarkdownQuickMemoApp:
     def _apply_list_wrap_indents(
         self,
         text: str,
-        active_line_start: int,
-        active_line_end: int,
     ) -> None:
         """Align wrapped list lines with the first character of the item body."""
 
@@ -1090,14 +1066,7 @@ class MarkdownQuickMemoApp:
             self._list_source_marker_font.measure(marker.source)
             for marker in self._analysis.list_markers
         ]
-        preview_marker_widths = [
-            self._list_marker_font(marker).measure(marker.label)
-            for marker in self._analysis.list_markers
-        ]
-        self._list_marker_column_width = max(
-            [*source_marker_widths, *preview_marker_widths],
-            default=0,
-        )
+        marker_column_width = max(source_marker_widths, default=0)
         for marker_index, (marker, source_marker_width) in enumerate(
             zip(self._analysis.list_markers, source_marker_widths, strict=True)
         ):
@@ -1107,16 +1076,11 @@ class MarkdownQuickMemoApp:
                 line_end = len(text)
             indentation = text[line_start : marker.start].expandtabs(4)
             spacing = text[marker.end : marker.content_start].expandtabs(4)
-            marker_on_active_line = (
-                marker.end > active_line_start and marker.start < active_line_end
-            )
-            preview_is_mounted = self.hide_markers.get() and not marker_on_active_line
             first_line_margin, wrap_margin = _list_layout_margins(
                 list_font.measure(indentation),
                 list_font.measure(spacing),
                 source_marker_width,
-                self._list_marker_column_width,
-                preview_is_mounted=preview_is_mounted,
+                marker_column_width,
             )
             tag = f"list_wrap_{marker_index}"
             self.editor.tag_configure(
@@ -1151,11 +1115,7 @@ class MarkdownQuickMemoApp:
                 active_line_start_index,
                 active_line_end_index,
             )
-            self._apply_list_wrap_indents(
-                self.editor.get("1.0", "end-1c"),
-                active_line_start,
-                active_line_end,
-            )
+            self._apply_list_wrap_indents(self.editor.get("1.0", "end-1c"))
             if yview:
                 self.editor.yview_moveto(yview[0])
             self._highlight_current_line()
@@ -1269,8 +1229,6 @@ class MarkdownQuickMemoApp:
             decorations.append((rule.start, rule.end, "rule", rule))
         for table in self._analysis.tables:
             decorations.append((table.start, table.end, "table", table))
-        for marker in self._analysis.list_markers:
-            decorations.append((marker.start, marker.end, "list_marker", marker))
         for block in self._analysis.quote_blocks:
             decorations.append((block.start, block.end, "quote_block", block))
         for expression in self._analysis.math_expressions:
@@ -1301,8 +1259,6 @@ class MarkdownQuickMemoApp:
             return self._create_horizontal_rule_widget()
         if record.decoration_type == "table":
             return self._create_table_widget(record.decoration)  # type: ignore[arg-type]
-        if record.decoration_type == "list_marker":
-            return self._create_list_marker_widget(record.decoration)  # type: ignore[arg-type]
         if record.decoration_type == "quote_block":
             return self._create_quote_block_widget(record.decoration)  # type: ignore[arg-type]
         return self._create_math_widget(record.decoration)  # type: ignore[arg-type]
@@ -1386,39 +1342,6 @@ class MarkdownQuickMemoApp:
         line = tk.Frame(container, background="#d1d5db", borderwidth=0, height=1)
         line.pack(fill="x", pady=8)
         return container
-
-    def _create_list_marker_widget(self, marker: ListMarker) -> tk.Frame:
-        marker_font = self._list_marker_font(marker)
-        container = tk.Frame(
-            self.editor,
-            background="#ffffff",
-            borderwidth=0,
-            width=max(1, self._list_marker_column_width),
-            height=max(
-                self._list_source_marker_font.metrics("linespace"),
-                marker_font.metrics("linespace"),
-            ),
-        )
-        container.pack_propagate(False)
-        label = tk.Label(
-            container,
-            text=marker.label,
-            background="#ffffff",
-            foreground="#111827",
-            borderwidth=0,
-            font=marker_font,
-            padx=0,
-            pady=0,
-        )
-        label.place(relx=1.0, rely=0.5, anchor="e")
-        return container
-
-    def _list_marker_font(self, marker: ListMarker) -> tkfont.Font:
-        if marker.ordered:
-            return self._list_marker_fonts["ordered"]
-        if marker.label == "○":
-            return self._list_marker_fonts["hollow"]
-        return self._list_marker_fonts["bullet"]
 
     @staticmethod
     def _wrap_quote_text(
