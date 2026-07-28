@@ -61,6 +61,18 @@ class AppFileActionTests(unittest.TestCase):
             root_bindings["<Control-Shift-E>"].__func__,
             MarkdownQuickMemoApp.open_save_folder,
         )
+        self.assertEqual(
+            root_bindings["<Control-q>"].__func__,
+            MarkdownQuickMemoApp.hide_window,
+        )
+
+    def test_alt_f4_closes_the_window(self) -> None:
+        app = MarkdownQuickMemoApp.__new__(MarkdownQuickMemoApp)
+        app.root = Mock()
+
+        app._configure_window()
+
+        app.root.protocol.assert_called_once_with("WM_DELETE_WINDOW", app.close)
 
     def test_list_layout_stays_aligned_between_source_and_preview_markers(self) -> None:
         source_marker_width = 7

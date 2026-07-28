@@ -278,10 +278,7 @@ class MarkdownQuickMemoApp:
         self.root.minsize(480, 360)
         self.root.attributes("-alpha", OPAQUE_WINDOW_ALPHA)
         self.root.option_add("*tearOff", False)
-        self.root.protocol(
-            "WM_DELETE_WINDOW",
-            self.hide_window if self._resident else self.close,
-        )
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_named_fonts(self) -> None:
         for font_name in ("TkDefaultFont", "TkMenuFont", "TkCaptionFont", "TkSmallCaptionFont"):
@@ -401,7 +398,7 @@ class MarkdownQuickMemoApp:
             command=self.export_pdf,
         )
         file_menu.add_separator()
-        file_menu.add_command(label="閉じる", accelerator="Ctrl+Q", command=self.close)
+        file_menu.add_command(label="閉じる", accelerator="Alt+F4", command=self.close)
         menu.add_cascade(label="ファイル", menu=file_menu)
 
         edit_menu = tk.Menu(menu)
@@ -459,12 +456,34 @@ class MarkdownQuickMemoApp:
         self.editor.tag_configure("italic", font=italic)
         self.editor.tag_configure("bold_italic", font=bold_italic)
         self.editor.tag_configure("strike", overstrike=True, foreground=colors["muted"])
-        self.editor.tag_configure("inline_code", font=mono, background=colors["code_bg"])
-        self.editor.tag_configure("code_block", font=mono, background=colors["code_bg"], lmargin1=12, lmargin2=12, spacing1=5, spacing3=5)
+        selection_tag_colors = {
+            "selectbackground": colors["selection"],
+            "selectforeground": "#111827",
+        }
+        self.editor.tag_configure(
+            "inline_code",
+            font=mono,
+            background=colors["code_bg"],
+            **selection_tag_colors,
+        )
+        self.editor.tag_configure(
+            "code_block",
+            font=mono,
+            background=colors["code_bg"],
+            lmargin1=12,
+            lmargin2=12,
+            spacing1=5,
+            spacing3=5,
+            **selection_tag_colors,
+        )
         code_language_font = mono.copy()
         code_language_font.configure(size=9, weight="bold")
         self.editor.tag_configure(
-            "code_language", font=code_language_font, foreground=colors["muted"], background=colors["code_bg"]
+            "code_language",
+            font=code_language_font,
+            foreground=colors["muted"],
+            background=colors["code_bg"],
+            **selection_tag_colors,
         )
         self.editor.tag_configure(
             "quote",
@@ -472,6 +491,7 @@ class MarkdownQuickMemoApp:
             background=QUOTE_BACKGROUND,
             lmargin1=8,
             lmargin2=8,
+            **selection_tag_colors,
         )
         self.editor.tag_configure("quote_marker", foreground=QUOTE_BAR_COLOR, font=bold)
         self.editor.tag_configure(
@@ -509,8 +529,19 @@ class MarkdownQuickMemoApp:
         self.editor.tag_configure("checkbox", foreground=colors["muted"])
         self.editor.tag_configure("checkbox_checked", foreground="#15803d", overstrike=True)
         self.editor.tag_configure("horizontal_rule", foreground=colors["muted"], justify="center")
-        self.editor.tag_configure("table", font=mono, background="#f8fafc")
-        self.editor.tag_configure("table_delimiter", font=mono, foreground=colors["muted"], background="#f8fafc")
+        self.editor.tag_configure(
+            "table",
+            font=mono,
+            background="#f8fafc",
+            **selection_tag_colors,
+        )
+        self.editor.tag_configure(
+            "table_delimiter",
+            font=mono,
+            foreground=colors["muted"],
+            background="#f8fafc",
+            **selection_tag_colors,
+        )
         math_font = tkfont.Font(family=MATH_SOURCE_FONT_FAMILY, size=12)
         self.editor.tag_configure("math_inline", font=math_font, foreground="#4338ca")
         self.editor.tag_configure(
@@ -533,9 +564,19 @@ class MarkdownQuickMemoApp:
             )
         self.editor.tag_configure("marker", foreground="#9ca3af")
         self.editor.tag_configure("marker_hidden", elide=True)
-        self.editor.tag_configure("current_line", background="#f8fafc")
-        self.editor.tag_configure("search_match", background="#fde68a", foreground="#111827")
-        self.editor.tag_configure("search_current", background="#fb923c", foreground="#111827")
+        self.editor.tag_configure("current_line", background="#f8fafc", **selection_tag_colors)
+        self.editor.tag_configure(
+            "search_match",
+            background="#fde68a",
+            foreground="#111827",
+            **selection_tag_colors,
+        )
+        self.editor.tag_configure(
+            "search_current",
+            background="#fb923c",
+            foreground="#111827",
+            **selection_tag_colors,
+        )
         self.editor.tag_lower("current_line")
 
     def _create_font(
@@ -641,7 +682,7 @@ class MarkdownQuickMemoApp:
             "<Control-Shift-S>": self.save_as,
             "<Control-Shift-R>": self.rename_current_file,
             "<Control-Shift-E>": self.open_save_folder,
-            "<Control-q>": self.close,
+            "<Control-q>": self.hide_window,
             "<Control-f>": self.show_search,
             "<Control-t>": self.show_table_dialog,
             "<Control-Shift-P>": self.export_pdf,
@@ -2064,7 +2105,7 @@ class MarkdownQuickMemoApp:
         return self._break()
 
     def hide_window(self, _event: tk.Event | None = None) -> str:
-        """Hide a resident window while preserving the current memo in memory."""
+        """Hide the window while preserving the current memo in memory."""
 
         self.root.withdraw()
         return self._break()
