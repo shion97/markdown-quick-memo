@@ -398,6 +398,7 @@ class MarkdownQuickMemoApp:
             command=self.export_pdf,
         )
         file_menu.add_separator()
+        file_menu.add_command(label="非表示", accelerator="Ctrl+Q", command=self.hide_window)
         file_menu.add_command(label="閉じる", accelerator="Alt+F4", command=self.close)
         menu.add_cascade(label="ファイル", menu=file_menu)
 

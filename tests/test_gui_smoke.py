@@ -283,6 +283,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("PDFに書き出す", file_labels)
         self.assertIn("ファイル名を変更...", file_labels)
         self.assertIn("保存先をエクスプローラーで開く", file_labels)
+        self.assertIn("非表示", file_labels)
         file_menu_indices = {
             file_menu.entrycget(index, "label"): index
             for index in range(file_menu.index("end") + 1)
@@ -301,6 +302,10 @@ class GuiSmokeTests(unittest.TestCase):
                 "accelerator",
             ),
             "Ctrl+Shift+E",
+        )
+        self.assertEqual(
+            file_menu.entrycget(file_menu_indices["非表示"], "accelerator"),
+            "Ctrl+Q",
         )
         self.assertEqual(
             file_menu.entrycget(file_menu_indices["閉じる"], "accelerator"),

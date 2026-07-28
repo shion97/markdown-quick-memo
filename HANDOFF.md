@@ -79,3 +79,13 @@ branch : `fix/shortcut-selection-inline-code`
 `Ctrl+Q` を待機状態への非表示化、`Alt+F4` を保存確認付きの完全終了へ変更。背景付きTextタグへ選択時の色を設定し、インラインコードの解析条件を空白を含む内容へ対応。
 ### 検証結果
 全86テスト、`compileall`、`git diff --check`が成功。
+
+## 2026-07-29 ファイルメニューへ非表示操作を追加
+comit : `ファイルメニューへ非表示操作を追加`
+branch : `fix/shortcut-selection-inline-code`
+### 要件
+ファイルメニューから `Ctrl+Q` の非表示操作を実行できるようにする。
+### 対応
+「閉じる」の前に「非表示」を追加し、アクセラレータを `Ctrl+Q`、実行処理を既存の `hide_window` に設定。GUIテストへメニュー項目とアクセラレータの検証を追加。
+### 検証結果
+`tests.test_gui_smoke.GuiSmokeTests.test_view_menu_is_removed_and_table_shortcut_is_bound` が成功し、`git diff --check`も問題なし。
