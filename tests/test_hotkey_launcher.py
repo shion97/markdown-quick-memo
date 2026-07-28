@@ -6,6 +6,7 @@ from markdown_quick_memo.hotkey_launcher import (
     MOD_SHIFT,
     is_app_window_title,
     parse_hotkey,
+    resolve_launch_command,
 )
 
 
@@ -34,6 +35,12 @@ class HotkeyLauncherTests(unittest.TestCase):
         self.assertTrue(is_app_window_title("Markdown Quick Memo"))
         self.assertTrue(is_app_window_title("無題.md — Markdown Quick Memo"))
         self.assertFalse(is_app_window_title("image.png"))
+
+    def test_background_launch_command_preloads_resident_app(self) -> None:
+        command = resolve_launch_command(background=True)
+
+        self.assertEqual(command.arguments[-1], "--background")
+        self.assertTrue(command.working_directory.is_dir())
 
 
 if __name__ == "__main__":

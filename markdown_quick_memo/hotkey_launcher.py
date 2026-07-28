@@ -23,9 +23,12 @@ MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
 WM_HOTKEY = 0x0312
 SW_RESTORE = 9
+SW_SHOW = 5
 ERROR_ALREADY_EXISTS = 183
 MUTEX_NAME = r"Local\MarkdownQuickMemoHotkeyLauncher"
 LAUNCH_THROTTLE_SECONDS = 0.75
+PRELOAD_WINDOW_WAIT_SECONDS = 2.0
+PRELOAD_WINDOW_POLL_SECONDS = 0.02
 
 
 @dataclass(frozen=True)
@@ -94,22 +97,26 @@ def is_app_window_title(title: str) -> bool:
     return title == APP_NAME or title.endswith(f"— {APP_NAME}")
 
 
-def resolve_launch_command() -> LaunchCommand:
+def resolve_launch_command(*, background: bool = False) -> LaunchCommand:
+    background_arguments = ("--background",) if background else ()
     if getattr(sys, "frozen", False):
         launcher_directory = Path(sys.executable).resolve().parent
         project_root = launcher_directory.parent.parent
         executable = launcher_directory.parent / "MarkdownQuickMemo" / "MarkdownQuickMemo.exe"
-        return LaunchCommand((str(executable),), project_root)
+        return LaunchCommand((str(executable), *background_arguments), project_root)
 
     project_root = Path(__file__).resolve().parent.parent
     executable = project_root / "dist" / "MarkdownQuickMemo" / "MarkdownQuickMemo.exe"
     if executable.exists():
-        return LaunchCommand((str(executable),), project_root)
+        return LaunchCommand((str(executable), *background_arguments), project_root)
 
     python = Path(sys.executable)
     pythonw = python.with_name("pythonw.exe")
     interpreter = pythonw if pythonw.exists() else python
-    return LaunchCommand((str(interpreter), "-m", "markdown_quick_memo"), project_root)
+    return LaunchCommand(
+        (str(interpreter), "-m", "markdown_quick_memo", *background_arguments),
+        project_root,
+    )
 
 
 class WindowsHotkeyLauncher:
@@ -120,6 +127,7 @@ class WindowsHotkeyLauncher:
         self._configure_api()
         self._mutex_handle: int | None = None
         self._last_launch_at = 0.0
+        self._preloaded_process: subprocess.Popen[bytes] | None = None
 
     def _configure_api(self) -> None:
         self._enum_windows_callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -174,6 +182,7 @@ class WindowsHotkeyLauncher:
             return 1
 
         try:
+            self._preload_app()
             message = wintypes.MSG()
             while True:
                 result = self.user32.GetMessageW(ctypes.byref(message), None, 0, 0)
@@ -196,22 +205,39 @@ class WindowsHotkeyLauncher:
 
         window = self._find_app_window()
         if window:
-            if self.user32.IsIconic(window):
-                self.user32.ShowWindow(window, SW_RESTORE)
-            self.user32.SetForegroundWindow(window)
+            self._activate_window(window)
             return
 
-        command = resolve_launch_command()
+        if self._preloaded_process is not None and self._preloaded_process.poll() is None:
+            window = self._wait_for_app_window()
+            if window:
+                self._activate_window(window)
+                return
+
+        self._preloaded_process = self._launch_app()
+        if self._preloaded_process is None:
+            return
+        window = self._wait_for_app_window()
+        if window:
+            self._activate_window(window)
+
+    def _preload_app(self) -> None:
+        if self._find_app_window():
+            return
+        self._preloaded_process = self._launch_app()
+
+    def _launch_app(self) -> subprocess.Popen[bytes] | None:
+        command = resolve_launch_command(background=True)
         executable = Path(command.arguments[0])
         if not executable.exists():
             self._show_error(f"起動先が見つかりません。\n{executable}")
-            return
+            return None
 
         creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
             subprocess, "DETACHED_PROCESS", 0
         )
         try:
-            subprocess.Popen(
+            return subprocess.Popen(
                 command.arguments,
                 cwd=command.working_directory,
                 close_fds=True,
@@ -219,14 +245,31 @@ class WindowsHotkeyLauncher:
             )
         except OSError as error:
             self._show_error(f"アプリを起動できませんでした。\n{error}")
+            return None
+
+    def _wait_for_app_window(self) -> int | None:
+        deadline = time.monotonic() + PRELOAD_WINDOW_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            window = self._find_app_window()
+            if window:
+                return window
+            if self._preloaded_process is not None and self._preloaded_process.poll() is not None:
+                return None
+            time.sleep(PRELOAD_WINDOW_POLL_SECONDS)
+        return None
+
+    def _activate_window(self, window: int) -> None:
+        if not self.user32.IsWindowVisible(window):
+            self.user32.ShowWindow(window, SW_SHOW)
+        elif self.user32.IsIconic(window):
+            self.user32.ShowWindow(window, SW_RESTORE)
+        self.user32.SetForegroundWindow(window)
 
     def _find_app_window(self) -> int | None:
         found_window: int | None = None
 
         def visit_window(window: int, _parameter: int) -> bool:
             nonlocal found_window
-            if not self.user32.IsWindowVisible(window):
-                return True
             title_length = self.user32.GetWindowTextLengthW(window)
             if title_length == 0:
                 return True

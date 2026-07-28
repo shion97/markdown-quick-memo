@@ -7,6 +7,8 @@ from PIL import Image
 
 from markdown_quick_memo.pdf_exporter import (
     PDF_BODY_FONT_SIZE,
+    PDF_HEADING_FONT_SIZES,
+    PDF_HEADING_MATH_FONT_SIZES,
     PDF_INLINE_MATH_DPI,
     PDF_LIST_BULLET_FONT_SIZE,
     PDF_LIST_NUMBER_OFFSET_Y,
@@ -25,6 +27,85 @@ from markdown_quick_memo.math_renderer import render_math_png
 
 
 class PdfExporterTests(unittest.TestCase):
+    def test_quotes_use_standard_nesting_lazy_continuation_and_space_trigger(self) -> None:
+        rendered_html = _markdown_to_html(
+            "a\n> b\n> c\n>> d\n> e\n>>> f\ng\n\nh"
+        )
+
+        self.assertEqual(rendered_html.count("<blockquote>"), 3)
+        self.assertIn("<p>b<br>\nc</p>", rendered_html)
+        self.assertIn("<p>d<br>\ne</p>", rendered_html)
+        self.assertIn("<p>f<br>\ng</p>", rendered_html)
+
+        root = _parse_html(rendered_html)
+        renderer = _PdfFlowableRenderer(
+            fonts=_PdfFonts(
+                "Helvetica",
+                "Helvetica-Bold",
+                "Helvetica-Oblique",
+                "Helvetica-BoldOblique",
+                "Helvetica",
+                "Helvetica-Bold",
+                "Courier",
+            ),
+            math_assets={},
+            list_assets={},
+            markdown_directory=Path("."),
+            available_width=400,
+        )
+        quote_node = next(
+            child for child in root.children if getattr(child, "tag", "") == "blockquote"
+        )
+        paragraph_node = next(
+            child
+            for child in quote_node.children
+            if getattr(child, "tag", "") == "p"
+        )
+        paragraph = renderer._paragraph_flowables(
+            paragraph_node,
+            style_name="quote",
+            quote_depth=1,
+        )[0]
+        self.assertIn("<br/>", paragraph.text)
+
+        strict_html = _markdown_to_html("> valid\n\n>invalid")
+        self.assertEqual(strict_html.count("<blockquote>"), 1)
+        self.assertIn("<p>&gt;invalid</p>", strict_html)
+
+        fence = "`" * 3
+        fenced_html = _markdown_to_html(f"{fence}\n>code\n{fence}")
+        self.assertIn("<pre><code>&gt;code", fenced_html)
+
+    def test_heading_inline_math_uses_heading_sizes(self) -> None:
+        markdown = "\n\n".join(
+            f"{'#' * level} 見出し{level} $x_{level}^2$"
+            for level in range(1, 7)
+        )
+        with TemporaryDirectory() as directory:
+            _prepared_markdown, math_assets = _prepare_math_assets(
+                markdown,
+                Path(directory),
+            )
+
+            assets = list(math_assets.values())
+            self.assertEqual(
+                [asset.font_size for asset in assets],
+                list(PDF_HEADING_MATH_FONT_SIZES),
+            )
+            self.assertTrue(
+                all(
+                    math_size < heading_size
+                    for math_size, heading_size in zip(
+                        PDF_HEADING_MATH_FONT_SIZES,
+                        PDF_HEADING_FONT_SIZES,
+                        strict=True,
+                    )
+                )
+            )
+            self.assertTrue(
+                all(asset.path is not None and asset.path.is_file() for asset in assets)
+            )
+
     def test_inline_math_uses_high_resolution_without_changing_pdf_size(self) -> None:
         expression = r"E=mc^2"
         legacy_dpi = 120
@@ -68,7 +149,7 @@ class PdfExporterTests(unittest.TestCase):
             self.assertEqual(sum(asset.display for asset in math_assets.values()), 11)
             self.assertEqual(
                 {asset.font_size for asset in math_assets.values()},
-                {8, 10, 15, 22},
+                {8, 10, 15, PDF_HEADING_MATH_FONT_SIZES[0]},
             )
             self.assertTrue(
                 all(
@@ -104,6 +185,29 @@ class PdfExporterTests(unittest.TestCase):
             [item.ordered for item in items],
             [False, False, True, True, False, True],
         )
+
+    def test_list_continuation_keeps_inline_markdown_inside_the_item(self) -> None:
+        markdown = (
+            "10. **Question:** What is the conclusion\n"
+            "    **質問:** 結論は何ですか？\n\n"
+            "* **Answer:** It depends."
+        )
+
+        prepared_markdown, list_assets = _prepare_list_assets(markdown)
+        items = [
+            item
+            for block in list_assets.values()
+            for item in block.items
+        ]
+
+        self.assertEqual(
+            items[0].content,
+            "**Question:** What is the conclusion\n**質問:** 結論は何ですか？",
+        )
+        self.assertNotIn("    **質問:**", prepared_markdown)
+        rendered_content = _markdown_to_html(items[0].content)
+        self.assertIn("<strong>質問:</strong>", rendered_content)
+        self.assertNotIn("<pre>", rendered_content)
 
     def test_underscore_emphasis_and_escaped_dollar_match_editor_syntax(self) -> None:
         rendered_html = _markdown_to_html(

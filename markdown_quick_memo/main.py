@@ -7,20 +7,25 @@ from pathlib import Path
 import tkinter as tk
 
 from .app import MarkdownQuickMemoApp
-from .font_support import register_bundled_fonts
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="素早く使えるMarkdownメモアプリ")
     parser.add_argument("file", nargs="?", type=Path, help="起動時に開くMarkdownファイル")
-    return parser.parse_args()
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="ホットキーから即座に表示できるようバックグラウンドで待機する",
+    )
+    return parser.parse_args(arguments)
 
 
 def main() -> None:
     args = parse_args()
-    register_bundled_fonts()
     root = tk.Tk()
-    MarkdownQuickMemoApp(root, args.file)
+    if args.background:
+        root.withdraw()
+    MarkdownQuickMemoApp(root, args.file, resident=args.background)
     root.mainloop()
 
 
