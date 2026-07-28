@@ -49,3 +49,13 @@
 - 原文表示と計測のフォントを統一し、プレビューを余白のない固定幅Canvasへ変更。
 - 埋め込みCanvasへリスト余白タグを明示適用し、記号右端、本文先頭、折り返し開始位置を状態間で統一。
 - Enter・Backspace・カーソル移動を含む実座標テストを追加し、全83テスト、`compileall`、`git diff --check`は成功。
+
+## 2026-07-29 `code-map` 廃止
+comit : `code-map` 廃止
+branch : `local/integration-current`
+### 要件
+廃止した `code-map` を安全に削除する。
+### 対応
+`docs/code-map/` 配下の索引と機能別ドキュメント4ファイルを削除。
+### 検証結果
+`docs/code-map/` の削除対象と参照を確認し、アプリ本体・設計資料に現行参照がないことを確認。
