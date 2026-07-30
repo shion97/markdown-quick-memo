@@ -7,6 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from markdown_quick_memo.app import (
+    EDITOR_SCROLL_ANIMATION_DURATION_MS,
+    EDITOR_SCROLL_ANIMATION_FRAME_MS,
     EDITOR_SCROLL_PIXELS_PER_NOTCH,
     DISPLAY_MATH_DPI,
     DISPLAY_MATH_FONT_SIZE,
@@ -64,7 +66,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("heading1", self.app.editor.tag_names())
         self.assertIn("marker_hidden", self.app.editor.tag_names())
         self.assertEqual(len(self.app._analysis.links), 1)
-        self.assertEqual(len(self.app._decoration_widgets), 5)
+        self.assertEqual(len(self.app._decoration_widgets), 4)
         self.assertTrue(
             all(
                 widget.bind("<MouseWheel>") and widget.bind("<Button-1>")
@@ -93,13 +95,13 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 5)
+        self.assertEqual(len(self.app._decoration_widgets), 4)
 
         table_index = self.app.editor.search("| 名前", "1.0", stopindex="end", elide=True)
         self.app.editor.mark_set("insert", table_index)
         self.app.render_markdown()
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
-        self.assertEqual(len(self.app._decoration_widgets), 4)
+        self.assertEqual(len(self.app._decoration_widgets), 3)
 
     def test_resident_window_can_hide_without_discarding_document(self) -> None:
         resident_root = tk.Tk()
@@ -183,37 +185,106 @@ class GuiSmokeTests(unittest.TestCase):
         self.app.render_markdown()
         self.root.update_idletasks()
 
-        marker_canvases = [
-            record.widget
+        marker_records = [
+            record
             for record in self.app._decoration_records
             if record.decoration_type == "list_marker"
         ]
         self.assertTrue(
-            all(isinstance(canvas, tk.Canvas) for canvas in marker_canvases)
-        )
-        preview_labels = [
-            canvas.itemcget(item, "text")
-            for canvas in marker_canvases
-            for item in canvas.find_withtag("list_marker_label")
-        ]
-        self.assertCountEqual(preview_labels, ["1.", "2.", "○", "1."])
-        bullet_canvas = next(
-            canvas
-            for canvas in marker_canvases
-            if any(
-                canvas.itemcget(item, "text") == "○"
-                for item in canvas.find_withtag("list_marker_label")
+            all(
+                record.widget is None
+                and record.image_name is not None
+                and record.image is not None
+                for record in marker_records
             )
         )
-        bullet_item = bullet_canvas.find_withtag("list_marker_label")[0]
-        bullet_font = tkfont.Font(font=bullet_canvas.itemcget(bullet_item, "font"))
-        self.assertEqual(bullet_font.actual("size"), 6)
-        self.assertEqual(int(bullet_canvas.cget("borderwidth")), 0)
-        self.assertEqual(int(bullet_canvas.cget("highlightthickness")), 0)
+        preview_labels = [record.decoration.label for record in marker_records]
+        self.assertCountEqual(preview_labels, ["1.", "2.", "○", "1."])
+        self.assertTrue(
+            all(
+                record.image_name in self.app.editor.image_names()
+                for record in marker_records
+            )
+        )
+        hollow_record = next(
+            record
+            for record in marker_records
+            if record.decoration.label == "○"
+        )
         self.assertEqual(
-            bullet_canvas.winfo_reqwidth(),
+            self.app._list_marker_font(hollow_record.decoration).actual("size"),
+            6,
+        )
+        self.assertEqual(
+            hollow_record.image.width(),
             self.app._list_marker_column_width,
         )
+        image_index = self.app.editor.index(hollow_record.image_name)
+        self.assertIn("list_marker_preview", self.app.editor.tag_names(image_index))
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_list_marker_images_stay_mounted_while_scrolling(self) -> None:
+        self.root.geometry("640x320+10000+10000")
+        self.root.deiconify()
+        markdown = (
+            "\n".join(f"1. 項目 {number}" for number in range(1, 81))
+            + "\n\nカーソル行"
+        )
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+        self.root.update()
+
+        marker_records = [
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "list_marker"
+        ]
+        image_names = {
+            record.image_name
+            for record in marker_records
+            if record.image_name is not None
+        }
+        self.assertEqual(len(image_names), 80)
+        self.assertFalse(
+            any(isinstance(widget, tk.Canvas) for widget in self.app.editor.winfo_children())
+        )
+
+        self.app.editor.yview_moveto(1.0)
+        self.root.update()
+        self.app.editor.yview_moveto(0.0)
+        self.root.update()
+
+        self.assertEqual(set(self.app.editor.image_names()), image_names)
+        self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
+
+    def test_clicking_list_marker_image_restores_its_source_line(self) -> None:
+        self.root.geometry("640x320+10000+10000")
+        self.root.deiconify()
+        markdown = "- 項目\n\nカーソル行"
+        self.app._replace_text(markdown)
+        self.app.editor.mark_set("insert", "end-1c")
+        self.app.render_markdown()
+        self.root.update()
+
+        marker_record = next(
+            record
+            for record in self.app._decoration_records
+            if record.decoration_type == "list_marker"
+        )
+        image_bounds = self.app.editor.bbox(marker_record.image_name)
+        self.assertIsNotNone(image_bounds)
+        x, y, width, height = image_bounds
+
+        self.app.editor.event_generate(
+            "<Button-1>",
+            x=x + width // 2,
+            y=y + height // 2,
+        )
+        self.root.update()
+
+        self.assertEqual(self.app.editor.index("insert linestart"), "1.0")
+        self.assertIsNone(marker_record.image_name)
         self.assertEqual(self.app.editor.get("1.0", "end-1c"), markdown)
 
     def test_quote_preview_uses_nested_bars_and_lazy_continuation(self) -> None:
@@ -439,11 +510,12 @@ class GuiSmokeTests(unittest.TestCase):
             ]
             self.assertEqual(len(marker_records), 3)
             for record in marker_records:
-                self.assertIsInstance(record.widget, tk.Canvas)
-                widget_index = self.app.editor.index(str(record.widget))
-                widget_bounds = self.app.editor.bbox(widget_index)
-                self.assertIsNotNone(widget_bounds)
-                edges.append(widget_bounds[0] + widget_bounds[2])
+                self.assertIsNone(record.widget)
+                self.assertIsNotNone(record.image_name)
+                image_index = self.app.editor.index(record.image_name)
+                image_bounds = self.app.editor.bbox(image_index)
+                self.assertIsNotNone(image_bounds)
+                edges.append(image_bounds[0] + image_bounds[2])
             return edges
 
         needles = ("a" * 8, "b" * 8, "c" * 8)
@@ -717,33 +789,91 @@ class GuiSmokeTests(unittest.TestCase):
         with (
             patch.object(self.app.editor, "yview", return_value=(0.2, 0.6)),
             patch.object(self.app.editor, "winfo_height", return_value=400),
-            patch.object(self.app.editor, "yview_moveto") as scroll,
+            patch.object(self.root, "after", return_value="scroll-animation") as after,
+            patch("markdown_quick_memo.app.monotonic", return_value=10.0),
         ):
             result = self.app._forward_editor_mousewheel(wheel_event)
 
         expected_fraction = 0.2 - EDITOR_SCROLL_PIXELS_PER_NOTCH * (0.6 - 0.2) / 400
-        scroll.assert_called_once()
-        self.assertAlmostEqual(scroll.call_args.args[0], expected_fraction)
+        after.assert_called_once_with(
+            EDITOR_SCROLL_ANIMATION_FRAME_MS,
+            self.app._animate_editor_scroll,
+        )
+        self.assertAlmostEqual(
+            self.app._scroll_animation_target_fraction,
+            expected_fraction,
+        )
         self.assertEqual(result, "break")
 
-    def test_scroll_redraw_is_coalesced_until_idle(self) -> None:
-        self.app._scroll_redraw_job = None
-
         with (
-            patch.object(self.app._editor_scrollbar, "set") as update_scrollbar,
-            patch.object(self.root, "after_idle", return_value="scroll-redraw") as after_idle,
+            patch.object(self.app.editor, "yview_moveto") as scroll,
+            patch(
+                "markdown_quick_memo.app.monotonic",
+                return_value=10.0 + EDITOR_SCROLL_ANIMATION_DURATION_MS / 1000 + 0.01,
+            ),
         ):
+            self.app._animate_editor_scroll()
+
+        scroll.assert_called_once_with(expected_fraction)
+        self.assertIsNone(self.app._scroll_animation_job)
+        self.assertIsNone(self.app._scroll_animation_target_fraction)
+
+    def test_smooth_scroll_accumulates_and_reverses_wheel_input(self) -> None:
+        wheel_event = tk.Event()
+        with (
+            patch.object(self.app.editor, "yview", return_value=(0.2, 0.6)),
+            patch.object(self.app.editor, "winfo_height", return_value=400),
+            patch.object(self.root, "after", return_value="scroll-animation") as after,
+            patch("markdown_quick_memo.app.monotonic", return_value=10.0),
+        ):
+            wheel_event.delta = -120
+            self.app._forward_editor_mousewheel(wheel_event)
+            first_target = self.app._scroll_animation_target_fraction
+            self.app._forward_editor_mousewheel(wheel_event)
+            second_target = self.app._scroll_animation_target_fraction
+            wheel_event.delta = 120
+            self.app._forward_editor_mousewheel(wheel_event)
+            reversed_target = self.app._scroll_animation_target_fraction
+
+        fraction_step = EDITOR_SCROLL_PIXELS_PER_NOTCH * (0.6 - 0.2) / 400
+        self.assertAlmostEqual(first_target, 0.2 + fraction_step)
+        self.assertAlmostEqual(second_target, 0.2 + fraction_step * 2)
+        self.assertAlmostEqual(reversed_target, 0.2 + fraction_step)
+        after.assert_called_once()
+
+        wheel_event.delta = 0
+        self.assertIsNone(self.app._forward_editor_mousewheel(wheel_event))
+
+    def test_scrollbar_cancels_smooth_scroll_before_moving(self) -> None:
+        self.app._scroll_animation_job = "scroll-animation"
+        self.app._scroll_animation_target_fraction = 0.5
+        with (
+            patch.object(self.root, "after_cancel") as cancel,
+            patch.object(self.app.editor, "yview") as yview,
+        ):
+            self.app._on_editor_scrollbar("moveto", "0.4")
+
+        cancel.assert_called_once_with("scroll-animation")
+        yview.assert_called_once_with("moveto", "0.4")
+        self.assertIsNone(self.app._scroll_animation_job)
+        self.assertIsNone(self.app._scroll_animation_target_fraction)
+
+    def test_keyboard_input_cancels_smooth_scroll(self) -> None:
+        self.app._scroll_animation_job = "scroll-animation"
+        self.app._scroll_animation_target_fraction = 0.5
+        with patch.object(self.root, "after_cancel") as cancel:
+            self.app._cancel_scroll_on_input()
+
+        cancel.assert_called_once_with("scroll-animation")
+        self.assertIsNone(self.app._scroll_animation_job)
+        self.assertIsNone(self.app._scroll_animation_target_fraction)
+
+    def test_scrollbar_updates_without_forcing_idle_redraw(self) -> None:
+        with patch.object(self.app._editor_scrollbar, "set") as update_scrollbar:
             self.app._on_editor_yview_changed("0.1", "0.5")
             self.app._on_editor_yview_changed("0.2", "0.6")
 
         self.assertEqual(update_scrollbar.call_count, 2)
-        after_idle.assert_called_once_with(self.app._flush_editor_scroll_redraw)
-
-        with patch.object(self.app.editor, "update_idletasks") as update_idletasks:
-            self.app._flush_editor_scroll_redraw()
-
-        update_idletasks.assert_called_once_with()
-        self.assertIsNone(self.app._scroll_redraw_job)
 
     def test_clicking_horizontal_rule_activates_its_markdown_line(self) -> None:
         markdown = "先頭\n\n---\n\n末尾"
