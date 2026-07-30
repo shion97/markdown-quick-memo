@@ -9,8 +9,8 @@ interface Continuation {
 }
 
 const LIST_PATTERN =
-  /^(\s*(?:>\s*)*)(\s*)([-+*]|\d+[.)])(\s+)(\[[ xX]\]\s+)?(.*)$/;
-const QUOTE_PATTERN = /^(\s*(?:>\s*)+)(.*)$/;
+  /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/;
+const QUOTE_PATTERN = /^((?:[ \t]*>[ \t]?)+)(.*)$/;
 
 export function continuationForLine(
   lineText: string,
@@ -29,7 +29,7 @@ export function continuationForLine(
       return {
         replacementFrom: quote.length,
         replacementTo: beforeCursor.length,
-        inserted: "\n",
+        inserted: quote ? `\n${quote}` : "\n",
       };
     }
     const nextMarker = /^\d/.test(marker) ? "1." : marker;
@@ -103,21 +103,29 @@ function insertPlainLineBreak(view: EditorView): boolean {
 
 function indentList(view: EditorView, remove: boolean): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);
-  if (!/^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+/.test(line.text)) {
+  const list = LIST_PATTERN.exec(line.text);
+  if (!list) {
     return false;
   }
+  const quoteLength = (list[1] ?? "").length;
+  const indentLength = (list[2] ?? "").length;
+  const indentationPosition = line.from + quoteLength;
   if (remove) {
-    const removable = /^ {1,2}/.exec(line.text)?.[0].length ?? 0;
+    const removable = Math.min(2, indentLength);
     if (removable === 0) {
       return true;
     }
     view.dispatch({
-      changes: { from: line.from, to: line.from + removable, insert: "" },
+      changes: {
+        from: indentationPosition,
+        to: indentationPosition + removable,
+        insert: "",
+      },
       userEvent: "input",
     });
   } else {
     view.dispatch({
-      changes: { from: line.from, insert: "  " },
+      changes: { from: indentationPosition, insert: "  " },
       userEvent: "input",
     });
   }

@@ -156,6 +156,11 @@ button.primary:hover {
   font-size: 12px;
 }
 
+.statusbar-left {
+  display: flex;
+  gap: 14px;
+}
+
 .mqm-math-inline {
   display: inline-block;
   padding: 0 0.12em;
@@ -177,9 +182,48 @@ button.primary:hover {
 
 .mqm-list-marker {
   display: inline-block;
-  min-width: 1.55em;
+  width: 2.4em;
+  margin-right: 0.35em;
   color: var(--accent);
+  text-align: right;
+  text-indent: 0;
   user-select: none;
+}
+
+.mqm-list-marker-label {
+  display: inline-block;
+}
+
+.mqm-list-marker-bullet {
+  font-size: 0.5em;
+  vertical-align: 0.2em;
+}
+
+.mqm-list-line {
+  --mqm-list-prefix-width: calc(var(--mqm-list-indent, 0ch) + 2.75em);
+  padding-left: var(--mqm-list-prefix-width) !important;
+  text-indent: calc(0px - var(--mqm-list-prefix-width));
+}
+
+.mqm-checkbox {
+  display: inline-grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  margin-left: 1.4em;
+  margin-right: 0.35em;
+  color: white;
+  border: 1px solid var(--accent);
+  border-radius: 0.18em;
+  font-size: 0.82em;
+  line-height: 1;
+  text-indent: 0;
+  vertical-align: -0.08em;
+  user-select: none;
+}
+
+.mqm-checkbox-checked {
+  background: var(--accent);
 }
 
 .mqm-horizontal-rule {
@@ -219,6 +263,42 @@ button.primary:hover {
 .mqm-heading {
   font-weight: 700;
   line-height: 1.35;
+  text-decoration: none !important;
+}
+
+.mqm-heading * {
+  text-decoration: none !important;
+}
+
+.mqm-inline-code {
+  padding: 0.12em 0.3em;
+  border-radius: 0.28em;
+  background: var(--surface-muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.9em;
+}
+
+.mqm-code-block-line {
+  padding-right: 1em !important;
+  padding-left: 1em !important;
+  background: var(--surface-muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
+.mqm-code-block-start {
+  padding-top: 0.55em !important;
+  border-radius: 0.45em 0.45em 0 0;
+}
+
+.mqm-code-block-end {
+  padding-bottom: 0.55em !important;
+  border-radius: 0 0 0.45em 0.45em;
+}
+
+.mqm-code-language {
+  color: var(--muted);
+  font-size: 0.78em;
+  font-style: italic;
 }
 
 .mqm-heading-1 {

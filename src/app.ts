@@ -43,6 +43,7 @@ export class MarkdownQuickMemoApplication {
   private readonly editorHost: HTMLElement;
   private readonly title: HTMLElement;
   private readonly status: HTMLElement;
+  private readonly cursorPosition: HTMLElement;
   private readonly imageDialog: HTMLDialogElement;
   private readonly imageElement: HTMLImageElement;
   private readonly settingsDialog: HTMLDialogElement;
@@ -59,6 +60,7 @@ export class MarkdownQuickMemoApplication {
     this.editorHost = this.required("#editor");
     this.title = this.required("#document-title");
     this.status = this.required("#status");
+    this.cursorPosition = this.required("#cursor-position");
     this.imageDialog = this.requiredDialog("#image-dialog");
     this.imageElement = this.requiredImage("#preview-image");
     this.settingsDialog = this.requiredDialog("#settings-dialog");
@@ -73,6 +75,9 @@ export class MarkdownQuickMemoApplication {
       },
       onCountsChanged: (characters, words) => {
         this.status.textContent = `${characters.toLocaleString()} 文字 / ${words.toLocaleString()} 語`;
+      },
+      onCursorChanged: (line, column) => {
+        this.cursorPosition.textContent = `${line}行 ${column}列`;
       },
       onControlClick: (position) => {
         void this.handleControlClick(position);
@@ -133,7 +138,10 @@ export class MarkdownQuickMemoApplication {
         </header>
         <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
         <footer class="statusbar">
-          <span id="status">0 文字 / 0 語</span>
+          <span class="statusbar-left">
+            <span id="cursor-position">1行 1列</span>
+            <span id="status">0 文字 / 0 語</span>
+          </span>
           <span>Markdown原文を保存</span>
         </footer>
       </main>

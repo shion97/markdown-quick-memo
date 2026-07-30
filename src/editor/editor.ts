@@ -10,7 +10,6 @@ import {
   highlightActiveLine,
   highlightSpecialChars,
   keymap,
-  lineNumbers,
 } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
@@ -19,6 +18,7 @@ import { markdownInputAssistance } from "./input-assistance";
 export interface EditorCallbacks {
   onDocumentChanged: (content: string) => void;
   onCountsChanged: (characters: number, words: number) => void;
+  onCursorChanged: (line: number, column: number) => void;
   onControlClick: (position: number) => void;
 }
 
@@ -48,11 +48,6 @@ function editorTheme(): Extension {
     ".cm-activeLine": {
       backgroundColor: "color-mix(in srgb, var(--accent) 6%, transparent)",
     },
-    ".cm-gutters": {
-      backgroundColor: "var(--surface)",
-      borderRight: "1px solid var(--border)",
-      color: "var(--muted)",
-    },
     ".cm-selectionBackground, ::selection": {
       backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent) !important",
     },
@@ -76,7 +71,6 @@ export function createEditor(
 ): EditorView {
   let countTimer: number | undefined;
   const extensions: Extension[] = [
-    lineNumbers(),
     highlightSpecialChars(),
     history(),
     drawSelection(),
@@ -93,6 +87,11 @@ export function createEditor(
     editorTheme(),
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
+      if (update.docChanged || update.selectionSet) {
+        const head = update.state.selection.main.head;
+        const line = update.state.doc.lineAt(head);
+        callbacks.onCursorChanged(line.number, head - line.from + 1);
+      }
       if (!update.docChanged) {
         return;
       }

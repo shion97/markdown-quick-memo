@@ -1,11 +1,9 @@
 import { syntaxTree } from "@codemirror/language";
-import { RangeSetBuilder, type Text } from "@codemirror/state";
+import { type EditorState, StateField, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
-  ViewPlugin,
-  type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
 import {
@@ -56,19 +54,50 @@ class MathWidget extends WidgetType {
 }
 
 class MarkerWidget extends WidgetType {
-  constructor(private readonly label: string) {
+  constructor(
+    private readonly label: string,
+    private readonly bullet: boolean,
+  ) {
     super();
   }
 
   eq(other: MarkerWidget): boolean {
-    return this.label === other.label;
+    return this.label === other.label && this.bullet === other.bullet;
   }
 
   toDOM(): HTMLElement {
     const marker = document.createElement("span");
     marker.className = "mqm-list-marker";
-    marker.textContent = this.label;
+    const label = document.createElement("span");
+    label.className = this.bullet
+      ? "mqm-list-marker-label mqm-list-marker-bullet"
+      : "mqm-list-marker-label";
+    label.textContent = this.label;
+    marker.append(label);
     return marker;
+  }
+}
+
+class CheckboxWidget extends WidgetType {
+  constructor(private readonly checked: boolean) {
+    super();
+  }
+
+  eq(other: CheckboxWidget): boolean {
+    return this.checked === other.checked;
+  }
+
+  toDOM(): HTMLElement {
+    const checkbox = document.createElement("span");
+    checkbox.className = this.checked
+      ? "mqm-checkbox mqm-checkbox-checked"
+      : "mqm-checkbox";
+    checkbox.textContent = this.checked ? "✓" : "";
+    checkbox.setAttribute(
+      "aria-label",
+      this.checked ? "チェック済み" : "未チェック",
+    );
+    return checkbox;
   }
 }
 
@@ -144,30 +173,21 @@ function appendTableCellContent(cell: HTMLElement, source: string): void {
   cell.append(document.createTextNode(source.slice(position)));
 }
 
-interface VisibleSegment {
+interface DocumentSegment {
   from: number;
   to: number;
 }
 
-function expandedVisibleSegments(view: EditorView): VisibleSegment[] {
-  return view.visibleRanges.map((range) => {
-    const fromLine = view.state.doc.lineAt(range.from);
-    const toLine = view.state.doc.lineAt(range.to);
-    const startLine = Math.max(1, fromLine.number - 2);
-    const endLine = Math.min(view.state.doc.lines, toLine.number + 2);
-    return {
-      from: view.state.doc.line(startLine).from,
-      to: view.state.doc.line(endLine).to,
-    };
-  });
+function documentSegment(state: EditorState): DocumentSegment {
+  return { from: 0, to: state.doc.length };
 }
 
 function protectedRanges(
-  view: EditorView,
-  segment: VisibleSegment,
+  state: EditorState,
+  segment: DocumentSegment,
 ): ProtectedRange[] {
   const protectedNodes: ProtectedRange[] = [];
-  syntaxTree(view.state).iterate({
+  syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
     enter: (node) => {
@@ -186,13 +206,28 @@ function protectedRanges(
 }
 
 function selectionTouches(
-  view: EditorView,
+  state: EditorState,
   from: number,
   to: number,
 ): boolean {
-  return view.state.selection.ranges.some(
+  return state.selection.ranges.some(
     (selection) => selection.from <= to && selection.to >= from,
   );
+}
+
+function insideFencedCode(state: EditorState, position: number): boolean {
+  let node = syntaxTree(state).resolveInner(position, 1);
+  while (node) {
+    if (node.name === "FencedCode") {
+      return true;
+    }
+    const parent = node.parent;
+    if (!parent) {
+      break;
+    }
+    node = parent;
+  }
+  return false;
 }
 
 function splitTableRow(line: string): string[] {
@@ -232,7 +267,7 @@ function tableDecoration(
   document: Text,
   startLineNumber: number,
   endLineNumber: number,
-  view: EditorView,
+  state: EditorState,
 ): { from: number; to: number; decoration: Decoration } | null {
   if (startLineNumber + 1 > endLineNumber) {
     return null;
@@ -261,7 +296,7 @@ function tableDecoration(
     lines.push(line.text);
     lastLine = line;
   }
-  if (selectionTouches(view, heading.from, lastLine.to)) {
+  if (selectionTouches(state, heading.from, lastLine.to)) {
     return null;
   }
   const rows = lines.map(splitTableRow);
@@ -288,7 +323,8 @@ function orderedListNumber(
     if (text.trim() === "") {
       break;
     }
-    const match = /^(\s*(?:>\s*)*\s*)\d+[.)]\s+/.exec(text);
+    const match =
+      /^((?:[ \t]*>[ \t]?)*[ \t]*)\d+[.)][ \t]+/.exec(text);
     if (!match) {
       if (/^\s*(?:[-+*])\s+/.test(text)) {
         continue;
@@ -303,17 +339,17 @@ function orderedListNumber(
 }
 
 function lineDecorations(
-  view: EditorView,
-  segment: VisibleSegment,
+  state: EditorState,
+  segment: DocumentSegment,
 ): { from: number; to: number; decoration: Decoration }[] {
   const results: { from: number; to: number; decoration: Decoration }[] = [];
-  const document = view.state.doc;
+  const document = state.doc;
   const startLine = document.lineAt(segment.from).number;
   const endLine = document.lineAt(segment.to).number;
   let lineNumber = startLine;
 
   while (lineNumber <= endLine) {
-    const table = tableDecoration(document, lineNumber, endLine, view);
+    const table = tableDecoration(document, lineNumber, endLine, state);
     if (table) {
       results.push(table);
       lineNumber = document.lineAt(table.to).number + 1;
@@ -321,7 +357,11 @@ function lineDecorations(
     }
 
     const line = document.line(lineNumber);
-    if (!selectionTouches(view, line.from, line.to)) {
+    if (insideFencedCode(state, line.from)) {
+      lineNumber += 1;
+      continue;
+    }
+    if (!selectionTouches(state, line.from, line.to)) {
       const heading = /^(#{1,6})(\s+)/.exec(line.text);
       if (heading) {
         const level = heading[1]?.length ?? 1;
@@ -352,27 +392,55 @@ function lineDecorations(
         continue;
       }
 
-      const list = /^(\s*(?:>\s*)*\s*)([-+*]|\d+[.)])(\s+)/.exec(line.text);
+      const list =
+        /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
+          line.text,
+        );
       if (list) {
-        const indentation = list[1] ?? "";
-        const marker = list[2] ?? "-";
+        const quote = list[1] ?? "";
+        const indent = list[2] ?? "";
+        const indentation = `${quote}${indent}`;
+        const marker = list[3] ?? "-";
         const markerFrom = line.from + indentation.length;
-        const markerTo = markerFrom + marker.length + (list[3]?.length ?? 1);
-        const label = /^\d/.test(marker)
-          ? `${orderedListNumber(document, lineNumber, indentation)}. `
-          : indentation.replace(/>\s*/g, "").length === 0
-            ? "● "
-            : "○ ";
+        const markerTo = markerFrom + marker.length + (list[4]?.length ?? 1);
+        const remainder = line.text.slice(markerTo - line.from);
+        const checkbox = /^(\[[ xX]\])([ \t]+)/.exec(remainder);
+        const visualIndent = indent.replace(/\t/g, "  ").length;
         results.push({
-          from: markerFrom,
-          to: markerTo,
-          decoration: Decoration.replace({
-            widget: new MarkerWidget(label),
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.line({
+            attributes: {
+              class: "mqm-list-line",
+              style: `--mqm-list-indent: ${visualIndent}ch`,
+            },
           }),
         });
+        if (checkbox) {
+          results.push({
+            from: markerFrom,
+            to: markerTo + checkbox[0].length,
+            decoration: Decoration.replace({
+              widget: new CheckboxWidget(/[xX]/.test(checkbox[1] ?? "")),
+            }),
+          });
+        } else {
+          const label = /^\d/.test(marker)
+            ? `${orderedListNumber(document, lineNumber, indentation)}.`
+            : visualIndent === 0
+              ? "●"
+              : "○";
+          results.push({
+            from: markerFrom,
+            to: markerTo,
+            decoration: Decoration.replace({
+              widget: new MarkerWidget(label, !/^\d/.test(marker)),
+            }),
+          });
+        }
       }
 
-      const quote = /^(\s*)((?:>\s*)+)/.exec(line.text);
+      const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
       if (quote) {
         const markers = quote[2] ?? "";
         const depth = (markers.match(/>/g) ?? []).length;
@@ -401,17 +469,43 @@ function lineDecorations(
 }
 
 function inlineMarkerDecorations(
-  view: EditorView,
-  segment: VisibleSegment,
+  state: EditorState,
+  segment: DocumentSegment,
 ): { from: number; to: number; decoration: Decoration }[] {
   const results: { from: number; to: number; decoration: Decoration }[] = [];
-  syntaxTree(view.state).iterate({
+  syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
     enter: (node) => {
+      if (node.name === "InlineCode") {
+        if (selectionTouches(state, node.from, node.to)) {
+          return false;
+        }
+        const source = state.doc.sliceString(node.from, node.to);
+        const opening = /^`+/.exec(source)?.[0].length ?? 0;
+        const closing = /`+$/.exec(source)?.[0].length ?? 0;
+        if (opening > 0 && closing > 0 && opening + closing <= source.length) {
+          results.push({
+            from: node.from,
+            to: node.from + opening,
+            decoration: Decoration.replace({}),
+          });
+          results.push({
+            from: node.from + opening,
+            to: node.to - closing,
+            decoration: Decoration.mark({ class: "mqm-inline-code" }),
+          });
+          results.push({
+            from: node.to - closing,
+            to: node.to,
+            decoration: Decoration.replace({}),
+          });
+        }
+        return false;
+      }
       if (
         !["EmphasisMark", "StrikethroughMark"].includes(node.name) ||
-        selectionTouches(view, node.from, node.to)
+        selectionTouches(state, node.from, node.to)
       ) {
         return;
       }
@@ -425,71 +519,137 @@ function inlineMarkerDecorations(
   return results;
 }
 
-export function buildDecorations(view: EditorView): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const entries: { from: number; to: number; decoration: Decoration }[] = [];
-
-  for (const segment of expandedVisibleSegments(view)) {
-    entries.push(...lineDecorations(view, segment));
-    entries.push(...inlineMarkerDecorations(view, segment));
-    const text = view.state.doc.sliceString(segment.from, segment.to);
-    for (const math of findMathRanges(
-      text,
-      segment.from,
-      protectedRanges(view, segment),
-    )) {
-      if (selectionTouches(view, math.from, math.to)) {
-        continue;
-      }
-      entries.push({
-        from: math.from,
-        to: math.to,
-        decoration: Decoration.replace({
-          widget: new MathWidget(math.expression, math.display, math.from),
-          block: math.display,
-          inclusive: false,
-        }),
-      });
-    }
-  }
-
-  entries
-    .sort((left, right) => left.from - right.from || left.to - right.to)
-    .filter(
-      (entry, index, all) =>
-        index === 0 ||
-        entry.from >= (all[index - 1]?.to ?? 0) ||
-        entry.from === entry.to,
-    )
-    .forEach((entry) => {
-      builder.add(entry.from, entry.to, entry.decoration);
-    });
-  return builder.finish();
-}
-
-export const markdownDecorations = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = buildDecorations(view);
-    }
-
-    update(update: ViewUpdate): void {
-      if (update.view.composing) {
+function fencedCodeDecorations(
+  state: EditorState,
+  segment: DocumentSegment,
+): { from: number; to: number; decoration: Decoration }[] {
+  const results: { from: number; to: number; decoration: Decoration }[] = [];
+  syntaxTree(state).iterate({
+    from: segment.from,
+    to: segment.to,
+    enter: (node) => {
+      if (
+        node.name !== "FencedCode" ||
+        selectionTouches(state, node.from, node.to)
+      ) {
         return;
       }
-      if (
-        update.docChanged ||
-        update.selectionSet ||
-        update.viewportChanged ||
-        update.geometryChanged
+      const firstLine = state.doc.lineAt(node.from);
+      const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1));
+      for (
+        let lineNumber = firstLine.number;
+        lineNumber <= lastLine.number;
+        lineNumber += 1
       ) {
-        this.decorations = buildDecorations(update.view);
+        const line = state.doc.line(lineNumber);
+        const classes = ["mqm-code-block-line"];
+        if (lineNumber === firstLine.number) {
+          classes.push("mqm-code-block-start");
+        }
+        if (lineNumber === lastLine.number) {
+          classes.push("mqm-code-block-end");
+        }
+        results.push({
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.line({
+            attributes: { class: classes.join(" ") },
+          }),
+        });
       }
+
+      const opening = /^([ \t]*)(`{3,}|~{3,})(.*)$/.exec(firstLine.text);
+      if (opening) {
+        const markerFrom = firstLine.from + (opening[1]?.length ?? 0);
+        const markerTo = markerFrom + (opening[2]?.length ?? 0);
+        results.push({
+          from: markerFrom,
+          to: markerTo,
+          decoration: Decoration.replace({}),
+        });
+        if (markerTo < firstLine.to) {
+          results.push({
+            from: markerTo,
+            to: firstLine.to,
+            decoration: Decoration.mark({ class: "mqm-code-language" }),
+          });
+        }
+      }
+
+      const closing = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/.exec(lastLine.text);
+      if (closing) {
+        const markerFrom = lastLine.from + (closing[1]?.length ?? 0);
+        results.push({
+          from: markerFrom,
+          to: lastLine.to,
+          decoration: Decoration.replace({}),
+        });
+      }
+      return false;
+    },
+  });
+  return results;
+}
+
+export function buildDecorations(state: EditorState): DecorationSet {
+  const entries: { from: number; to: number; decoration: Decoration }[] = [];
+  const segment = documentSegment(state);
+
+  entries.push(...lineDecorations(state, segment));
+  entries.push(...inlineMarkerDecorations(state, segment));
+  entries.push(...fencedCodeDecorations(state, segment));
+  const text = state.doc.sliceString(segment.from, segment.to);
+  for (const math of findMathRanges(
+    text,
+    segment.from,
+    protectedRanges(state, segment),
+  )) {
+    if (selectionTouches(state, math.from, math.to)) {
+      continue;
     }
+    entries.push({
+      from: math.from,
+      to: math.to,
+      decoration: Decoration.replace({
+        widget: new MathWidget(math.expression, math.display, math.from),
+        block: math.display,
+        inclusive: false,
+      }),
+    });
+  }
+
+  const accepted: typeof entries = [];
+  let coveredUntil = -1;
+  for (const entry of entries.sort(
+    (left, right) => left.from - right.from || left.to - right.to,
+  )) {
+    if (entry.from === entry.to) {
+      accepted.push(entry);
+      continue;
+    }
+    if (entry.from < coveredUntil) {
+      continue;
+    }
+    accepted.push(entry);
+    coveredUntil = entry.to;
+  }
+  return Decoration.set(
+    accepted.map((entry) =>
+      entry.decoration.range(entry.from, entry.to),
+    ),
+    true,
+  );
+}
+
+export const markdownDecorations = StateField.define<DecorationSet>({
+  create(state) {
+    return buildDecorations(state);
   },
-  {
-    decorations: (plugin) => plugin.decorations,
+  update(decorations, transaction) {
+    if (transaction.docChanged || transaction.selection) {
+      return buildDecorations(transaction.state);
+    }
+    return decorations;
   },
-);
+  provide: (field) => EditorView.decorations.from(field),
+});

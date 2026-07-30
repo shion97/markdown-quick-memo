@@ -14,6 +14,20 @@ describe("continuationForLine", () => {
     expect(continuationForLine(">   - 項目", 8).inserted).toBe("\n>   - ");
   });
 
+  it("空の引用内リストを終了して引用階層だけを残す", () => {
+    expect(continuationForLine("> - ", 4)).toEqual({
+      replacementFrom: 2,
+      replacementTo: 4,
+      inserted: "\n> ",
+    });
+  });
+
+  it("ネストしたチェックリストを同じ字下げで継続する", () => {
+    expect(continuationForLine("  - [x] 完了", 10).inserted).toBe(
+      "\n  - [ ] ",
+    );
+  });
+
   it("通常行はインデントだけを継続する", () => {
     expect(continuationForLine("    本文", 6).inserted).toBe("\n    ");
   });
