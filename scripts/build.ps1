@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Python = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $LauncherExecutable = Join-Path $ProjectRoot "dist\MarkdownQuickMemoHotkey\MarkdownQuickMemoHotkey.exe"
 $LauncherProcesses = @(Get-Process -Name "MarkdownQuickMemoHotkey" -ErrorAction SilentlyContinue)
 $LauncherWasRunning = $LauncherProcesses.Count -gt 0
@@ -30,7 +30,7 @@ if (-not $ScheduledTask -and -not $SavedRunCommand -and (Test-Path -LiteralPath 
 }
 
 if (-not (Test-Path $Python)) {
-    throw "venv\Scripts\python.exe was not found."
+    throw ".venv\Scripts\python.exe was not found."
 }
 
 if ($LauncherWasRunning) {

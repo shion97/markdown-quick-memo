@@ -5,8 +5,9 @@ Windows向けの、小型でキーボード中心のMarkdownメモアプリで�
 ## セットアップと起動
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -m markdown_quick_memo
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv\Scripts\python.exe -m markdown_quick_memo
 ```
 
 コンソールなしで起動する場合は次を使います。
@@ -75,7 +76,7 @@ PDF書き出しは「ファイル」メニューまたは `Ctrl + Shift + P` か
 ## テスト
 
 ```powershell
-.\venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 ## exeの作成
