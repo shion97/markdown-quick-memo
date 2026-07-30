@@ -20,6 +20,18 @@ class MarkdownStylerTests(unittest.TestCase):
         language_span = next(span for span in analysis.spans if span.tag == "code_language")
         self.assertEqual(text[language_span.start : language_span.end], "python")
 
+    def test_inline_code_allows_leading_and_trailing_half_width_and_full_width_spaces(self) -> None:
+        text = "` code ` と `　コード　`"
+
+        inline_code_spans = [
+            span for span in analyze_markdown(text).spans if span.tag == "inline_code"
+        ]
+
+        self.assertEqual(
+            [text[span.start : span.end] for span in inline_code_spans],
+            [" code ", "　コード　"],
+        )
+
     def test_links_and_images_keep_targets(self) -> None:
         text = "[OpenAI](https://openai.com) ![画像](image.png)"
         analysis = analyze_markdown(text)

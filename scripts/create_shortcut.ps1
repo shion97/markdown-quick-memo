@@ -9,18 +9,18 @@ $LauncherExecutable = Join-Path $ProjectRoot "dist\MarkdownQuickMemoHotkey\Markd
 $Arguments = ""
 
 if (-not (Test-Path $Executable)) {
-    $Executable = Join-Path $ProjectRoot "venv\Scripts\pythonw.exe"
+    $Executable = Join-Path $ProjectRoot ".venv\Scripts\pythonw.exe"
     if (-not (Test-Path $Executable)) {
-        throw "venv\Scripts\pythonw.exe was not found. Create the virtual environment first."
+        throw ".venv\Scripts\pythonw.exe was not found. Create the virtual environment first."
     }
     $Arguments = '-m markdown_quick_memo'
 }
 
 $LauncherArguments = "--hotkey $Hotkey"
 if (-not (Test-Path $LauncherExecutable)) {
-    $LauncherExecutable = Join-Path $ProjectRoot "venv\Scripts\pythonw.exe"
+    $LauncherExecutable = Join-Path $ProjectRoot ".venv\Scripts\pythonw.exe"
     if (-not (Test-Path $LauncherExecutable)) {
-        throw "The hotkey launcher executable and venv\Scripts\pythonw.exe were not found."
+        throw "The hotkey launcher executable and .venv\Scripts\pythonw.exe were not found."
     }
     $LauncherArguments = "-m markdown_quick_memo.hotkey_launcher --hotkey $Hotkey"
 }

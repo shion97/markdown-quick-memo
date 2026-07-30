@@ -122,6 +122,30 @@ class GuiSmokeTests(unittest.TestCase):
                 resident_app._cancel_scheduled_jobs()
             resident_root.destroy()
 
+    def test_background_styles_keep_selection_colors(self) -> None:
+        markdown = "` code `\n\n```python\nprint(1)\n```"
+        self.app._replace_text(markdown)
+        self.app.render_markdown()
+
+        code_start = self.app.editor.search("code", "1.0")
+        self.app.editor.tag_add("sel", code_start, f"{code_start} + 4c")
+        self.app.render_markdown()
+
+        selection_background = self.app.editor.cget("selectbackground")
+        selection_foreground = self.app.editor.cget("selectforeground")
+        self.assertEqual(
+            self.app.editor.tag_cget("inline_code", "selectbackground"),
+            selection_background,
+        )
+        self.assertEqual(
+            self.app.editor.tag_cget("code_block", "selectbackground"),
+            selection_background,
+        )
+        self.assertEqual(
+            self.app.editor.tag_cget("inline_code", "selectforeground"),
+            selection_foreground,
+        )
+
     def test_editor_wraps_at_character_boundary_across_styles_and_spaces(self) -> None:
         self.root.minsize(480, 360)
         self.root.geometry("480x360+10000+10000")
@@ -259,6 +283,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("PDFに書き出す", file_labels)
         self.assertIn("ファイル名を変更...", file_labels)
         self.assertIn("保存先をエクスプローラーで開く", file_labels)
+        self.assertIn("非表示", file_labels)
         file_menu_indices = {
             file_menu.entrycget(index, "label"): index
             for index in range(file_menu.index("end") + 1)
@@ -277,6 +302,14 @@ class GuiSmokeTests(unittest.TestCase):
                 "accelerator",
             ),
             "Ctrl+Shift+E",
+        )
+        self.assertEqual(
+            file_menu.entrycget(file_menu_indices["非表示"], "accelerator"),
+            "Ctrl+Q",
+        )
+        self.assertEqual(
+            file_menu.entrycget(file_menu_indices["閉じる"], "accelerator"),
+            "Alt+F4",
         )
         self.assertTrue(self.root.bind("<Control-Shift-R>"))
         self.assertTrue(self.root.bind("<Control-Shift-E>"))

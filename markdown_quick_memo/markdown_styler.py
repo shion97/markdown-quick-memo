@@ -110,7 +110,7 @@ QUOTE_INTERRUPT_PATTERN = re.compile(
     r"(?:_[ \t]*){3,}"
     r")"
 )
-INLINE_CODE_PATTERN = re.compile(r"(?<!\\)(`+)(?=\S)(.+?)(?<=\S)\1")
+INLINE_CODE_PATTERN = re.compile(r"(?<!\\)(`+)(?!`)([^\r\n]*?\S[^\r\n]*?)\1")
 IMAGE_PATTERN = re.compile(r"(?<!\\)!\[([^\]]*)\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 INLINE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (

@@ -69,3 +69,23 @@ branch : `local/integration-current`
 `docs/code-map/` 配下の索引と機能別ドキュメント4ファイルを削除。
 ### 検証結果
 `docs/code-map/` の削除対象と参照を確認し、アプリ本体・設計資料に現行参照がないことを確認。
+
+## 2026-07-29 終了操作・コード表示・選択表示を修正
+comit : `終了操作・コード表示・選択表示を修正`
+branch : `fix/shortcut-selection-inline-code`
+### 要件
+`Ctrl+Q` と `Alt+F4` の役割を入れ替え、背景色付きのコード等でも選択範囲を確認できるようにする。インラインコードは先頭・末尾に半角・全角スペースがある場合も認識する。
+### 対応
+`Ctrl+Q` を待機状態への非表示化、`Alt+F4` を保存確認付きの完全終了へ変更。背景付きTextタグへ選択時の色を設定し、インラインコードの解析条件を空白を含む内容へ対応。
+### 検証結果
+全86テスト、`compileall`、`git diff --check`が成功。
+
+## 2026-07-29 ファイルメニューへ非表示操作を追加
+comit : `ファイルメニューへ非表示操作を追加`
+branch : `fix/shortcut-selection-inline-code`
+### 要件
+ファイルメニューから `Ctrl+Q` の非表示操作を実行できるようにする。
+### 対応
+「閉じる」の前に「非表示」を追加し、アクセラレータを `Ctrl+Q`、実行処理を既存の `hide_window` に設定。GUIテストへメニュー項目とアクセラレータの検証を追加。
+### 検証結果
+`tests.test_gui_smoke.GuiSmokeTests.test_view_menu_is_removed_and_table_shortcut_is_bound` が成功し、`git diff --check`も問題なし。
