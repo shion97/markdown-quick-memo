@@ -1,5 +1,15 @@
+import {
+  cursorCharBackwardLogical,
+  cursorCharForwardLogical,
+  cursorLineDown,
+  cursorLineUp,
+  selectCharBackwardLogical,
+  selectCharForwardLogical,
+  selectLineDown,
+  selectLineUp,
+} from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type Extension } from "@codemirror/state";
+import { EditorSelection, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
 interface Continuation {
@@ -197,12 +207,22 @@ function pairInputHandler(
 
 export function markdownInputAssistance(): Extension {
   return [
-    keymap.of([
-      { key: "Enter", run: insertContinuation },
-      { key: "Shift-Enter", run: insertPlainLineBreak },
-      { key: "Tab", run: (view) => indentList(view, false) },
-      { key: "Shift-Tab", run: (view) => indentList(view, true) },
-    ]),
+    Prec.highest(
+      keymap.of([
+        { key: "Enter", run: insertContinuation },
+        { key: "Shift-Enter", run: insertPlainLineBreak },
+        { key: "Tab", run: (view) => indentList(view, false) },
+        { key: "Shift-Tab", run: (view) => indentList(view, true) },
+        { key: "ArrowLeft", run: cursorCharBackwardLogical },
+        { key: "ArrowRight", run: cursorCharForwardLogical },
+        { key: "ArrowUp", run: cursorLineUp },
+        { key: "ArrowDown", run: cursorLineDown },
+        { key: "Shift-ArrowLeft", run: selectCharBackwardLogical },
+        { key: "Shift-ArrowRight", run: selectCharForwardLogical },
+        { key: "Shift-ArrowUp", run: selectLineUp },
+        { key: "Shift-ArrowDown", run: selectLineDown },
+      ]),
+    ),
     EditorView.inputHandler.of(pairInputHandler),
   ];
 }

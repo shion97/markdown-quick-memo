@@ -202,8 +202,9 @@ button.primary:hover {
 .mqm-list-line {
   --mqm-list-prefix-width: calc(var(--mqm-list-indent, 0ch) + 2.75em);
   padding-left: var(--mqm-list-prefix-width) !important;
-  overflow-wrap: anywhere;
+  overflow-wrap: anywhere !important;
   text-indent: calc(0px - var(--mqm-list-prefix-width));
+  word-break: break-all !important;
 }
 
 .mqm-checkbox {
@@ -235,7 +236,7 @@ button.primary:hover {
 }
 
 .mqm-quote-line {
-  background: color-mix(in srgb, var(--surface-muted) 82%, var(--muted) 18%);
+  background: var(--surface-muted);
   color: color-mix(in srgb, var(--text) 80%, var(--muted));
 }
 
@@ -251,7 +252,7 @@ button.primary:hover {
   display: inline-block;
   width: 1em;
   height: 100%;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-left: 4px solid color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
 .mqm-table {
@@ -293,7 +294,7 @@ button.primary:hover {
 }
 
 .mqm-emphasis-content {
-  font-style: italic;
+  font-style: italic !important;
 }
 
 .mqm-code-block-line {

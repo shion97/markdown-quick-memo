@@ -585,7 +585,6 @@ function inlineMarkerDecorations(
     enter: (node) => {
       if (
         node.name === "Emphasis" &&
-        !selectionTouches(state, node.from, node.to) &&
         node.to - node.from > 2
       ) {
         results.push({

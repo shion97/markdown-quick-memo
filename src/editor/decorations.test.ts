@@ -9,12 +9,12 @@ import { markdownDecorations } from "./decorations";
 
 const views: EditorView[] = [];
 
-function renderDocument(source: string): HTMLElement {
+function renderDocument(source: string, cursor = source.length): HTMLElement {
   const parent = document.createElement("div");
   document.body.append(parent);
   const state = EditorState.create({
     doc: source,
-    selection: { anchor: source.length },
+    selection: { anchor: cursor },
     extensions: [
       markdown({
         base: markdownLanguage,
@@ -104,5 +104,13 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-quote-line")).toHaveLength(3);
     expect(parent.querySelectorAll(".mqm-quote-markers")).toHaveLength(3);
     expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(6);
+  });
+
+  it("カーソルが斜体内にあっても内容の斜体表示を維持する", () => {
+    const parent = renderDocument("*A*", 1);
+
+    expect(parent.querySelector(".mqm-emphasis-content")?.textContent).toBe(
+      "A",
+    );
   });
 });
