@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 from threading import Thread
+from time import monotonic
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 import webbrowser
@@ -41,6 +42,8 @@ APP_NAME = "Markdown Quick Memo"
 DEFAULT_GEOMETRY = "760x620"
 RENDER_DELAY_MS = 140
 EDITOR_SCROLL_PIXELS_PER_NOTCH = 48
+EDITOR_SCROLL_ANIMATION_DURATION_MS = 120
+EDITOR_SCROLL_ANIMATION_FRAME_MS = 16
 WINDOWS_MOUSE_WHEEL_DELTA = 120
 LIST_BULLET_FONT_SIZE = 9
 LIST_HOLLOW_BULLET_FONT_SIZE = 6
@@ -143,6 +146,12 @@ class _DecorationRecord:
     start_mark: str
     end_mark: str
     widget: tk.Widget | None = None
+    image_name: str | None = None
+    image: object | None = None
+
+    @property
+    def is_mounted(self) -> bool:
+        return self.widget is not None or self.image_name is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +178,7 @@ class MarkdownQuickMemoApp:
     ) -> None:
         self.root = root
         self._resident = resident
-        register_bundled_fonts()
+        self._bundled_font_paths = register_bundled_fonts()
         self._latin_font_family = LATIN_FONT_FAMILY
         self._japanese_font_family = JAPANESE_FONT_FAMILY
         self._font_objects: list[tkfont.Font] = []
@@ -178,7 +187,10 @@ class MarkdownQuickMemoApp:
         self.hide_markers = tk.BooleanVar(value=True)
         self.transparent_mode = tk.BooleanVar(value=False)
         self._render_job: str | None = None
-        self._scroll_redraw_job: str | None = None
+        self._scroll_animation_job: str | None = None
+        self._scroll_animation_started_at = 0.0
+        self._scroll_animation_start_fraction = 0.0
+        self._scroll_animation_target_fraction: float | None = None
         self._last_cursor_line = 1
         self._analysis = MarkdownAnalysis()
         self._text_index_mapper = _TextIndexMapper.from_text("")
@@ -200,6 +212,7 @@ class MarkdownQuickMemoApp:
         self._word_count = 0
         self._document_statistics_dirty = True
         self._list_marker_column_width = 0
+        self._list_marker_image_cache: dict[tuple[object, ...], object] = {}
 
         self._configure_named_fonts()
         self._configure_window()
@@ -329,7 +342,11 @@ class MarkdownQuickMemoApp:
             spacing1=2,
             spacing3=2,
         )
-        scrollbar = ttk.Scrollbar(editor_frame, orient="vertical", command=self.editor.yview)
+        scrollbar = ttk.Scrollbar(
+            editor_frame,
+            orient="vertical",
+            command=self._on_editor_scrollbar,
+        )
         self._editor_scrollbar = scrollbar
         self.editor.configure(yscrollcommand=self._on_editor_yview_changed)
         self.editor.grid(row=0, column=0, sticky="nsew")
@@ -701,8 +718,10 @@ class MarkdownQuickMemoApp:
         self.editor.bind("<Shift-Return>", self._on_shift_return)
         self.editor.bind("<Tab>", self._on_list_indent)
         self.editor.bind("<Shift-Tab>", self._on_list_outdent)
+        self.editor.bind("<KeyPress>", self._cancel_scroll_on_input, add=True)
         self.editor.bind("<KeyPress>", self._on_pair_key, add=True)
         self.editor.bind("<KeyRelease>", self._on_cursor_moved, add=True)
+        self.editor.bind("<Button-1>", self._activate_list_marker_image, add=True)
         self.editor.bind("<ButtonRelease-1>", self._on_cursor_moved, add=True)
         self.editor.bind("<Control-Button-1>", self._on_control_click, add=True)
         self.editor.bind("<Configure>", self._on_editor_resized, add=True)
@@ -1037,6 +1056,7 @@ class MarkdownQuickMemoApp:
     def render_markdown(self) -> None:
         if self._rendering:
             return
+        self._cancel_scroll_animation()
         self._rendering = True
         self._render_job = None
         try:
@@ -1252,19 +1272,7 @@ class MarkdownQuickMemoApp:
 
     def _clear_decorations(self) -> None:
         for record in sorted(self._decoration_records, key=lambda item: item.start, reverse=True):
-            widget = record.widget
-            if widget is None:
-                continue
-            try:
-                window_index = self.editor.index(str(widget))
-                self.editor.delete(window_index)
-            except tk.TclError:
-                pass
-            try:
-                widget.destroy()
-            except tk.TclError:
-                pass
-            record.widget = None
+            self._unmount_decoration(record)
         for record in self._decoration_records:
             try:
                 self.editor.mark_unset(record.start_mark, record.end_mark)
@@ -1347,49 +1355,74 @@ class MarkdownQuickMemoApp:
             return self._create_horizontal_rule_widget()
         if record.decoration_type == "table":
             return self._create_table_widget(record.decoration)  # type: ignore[arg-type]
-        if record.decoration_type == "list_marker":
-            return self._create_list_marker_widget(record.decoration)  # type: ignore[arg-type]
         if record.decoration_type == "quote_block":
             return self._create_quote_block_widget(record.decoration)  # type: ignore[arg-type]
         return self._create_math_widget(record.decoration)  # type: ignore[arg-type]
 
     def _mount_decoration(self, record: _DecorationRecord) -> None:
-        if record.widget is not None:
+        if record.is_mounted:
             return
-        widget = self._create_decoration_widget(record)
-        self.editor.window_create(record.start_mark, window=widget, align="center")
-        self._bind_editor_decoration_events(widget)
+        if record.decoration_type == "list_marker":
+            image = self._create_list_marker_image(record.decoration)  # type: ignore[arg-type]
+            image_name = self.editor.image_create(
+                record.start_mark,
+                image=image,
+                align="center",
+            )
+            record.image_name = str(image_name)
+            record.image = image
+            decoration_index = self.editor.index(record.image_name)
+        else:
+            widget = self._create_decoration_widget(record)
+            self.editor.window_create(record.start_mark, window=widget, align="center")
+            self._bind_editor_decoration_events(widget)
+            record.widget = widget
+            self._decoration_widgets.append(widget)
+            decoration_index = self.editor.index(str(widget))
+
         if record.start < record.end:
             self.editor.tag_add("marker_hidden", record.start_mark, record.end_mark)
-        window_index = self.editor.index(str(widget))
-        window_end = f"{window_index} +1c"
+        decoration_end = f"{decoration_index} +1c"
         for marker_tag in ("marker", "marker_concealable", "marker_hidden"):
-            self.editor.tag_remove(marker_tag, window_index, window_end)
+            self.editor.tag_remove(marker_tag, decoration_index, decoration_end)
         if record.decoration_type == "list_marker":
             for tag in self.editor.tag_names(record.start_mark):
                 if tag.startswith("list_wrap_"):
-                    self.editor.tag_add(tag, window_index, window_end)
-        record.widget = widget
-        self._decoration_widgets.append(widget)
+                    self.editor.tag_add(tag, decoration_index, decoration_end)
+            self.editor.tag_add(
+                "list_marker_preview",
+                decoration_index,
+                decoration_end,
+            )
 
     def _unmount_decoration(self, record: _DecorationRecord) -> None:
-        widget = record.widget
-        if widget is None:
+        if not record.is_mounted:
             return
-        try:
-            window_index = self.editor.index(str(widget))
-            self.editor.delete(window_index)
-        except tk.TclError:
-            pass
-        try:
-            widget.destroy()
-        except tk.TclError:
-            pass
-        try:
-            self._decoration_widgets.remove(widget)
-        except ValueError:
-            pass
-        record.widget = None
+        if record.image_name is not None:
+            try:
+                image_index = self.editor.index(record.image_name)
+                self.editor.delete(image_index)
+            except tk.TclError:
+                pass
+            record.image_name = None
+            record.image = None
+        else:
+            widget = record.widget
+            if widget is not None:
+                try:
+                    window_index = self.editor.index(str(widget))
+                    self.editor.delete(window_index)
+                except tk.TclError:
+                    pass
+                try:
+                    widget.destroy()
+                except tk.TclError:
+                    pass
+                try:
+                    self._decoration_widgets.remove(widget)
+                except ValueError:
+                    pass
+                record.widget = None
         if record.start < record.end:
             self.editor.tag_remove("marker_hidden", record.start_mark, record.end_mark)
         self._set_marker_visibility(record.start_mark, record.end_mark, hidden=True)
@@ -1411,9 +1444,9 @@ class MarkdownQuickMemoApp:
                 active_line_start,
                 active_line_end,
             )
-            if record.widget is not None and not should_mount:
+            if record.is_mounted and not should_mount:
                 records_to_unmount.append(record)
-            elif record.widget is None and should_mount:
+            elif not record.is_mounted and should_mount:
                 records_to_mount.append(record)
 
         for record in sorted(records_to_unmount, key=lambda item: item.start, reverse=True):
@@ -1437,32 +1470,60 @@ class MarkdownQuickMemoApp:
         line.pack(fill="x", pady=8)
         return container
 
-    def _create_list_marker_widget(self, marker: ListMarker) -> tk.Canvas:
+    def _create_list_marker_image(self, marker: ListMarker) -> object:
+        from PIL import Image, ImageDraw, ImageFont, ImageTk
+
         marker_font = self._list_marker_font(marker)
         marker_width = max(1, self._list_marker_column_width)
         marker_height = max(
             self._list_source_marker_font.metrics("linespace"),
             marker_font.metrics("linespace"),
         )
-        canvas = tk.Canvas(
-            self.editor,
-            background="#ffffff",
-            borderwidth=0,
-            highlightthickness=0,
-            relief="flat",
-            width=marker_width,
-            height=marker_height,
+        marker_font_size = max(
+            1,
+            round(abs(int(marker_font.actual("size"))) * self.root.winfo_fpixels("1p")),
         )
-        canvas.create_text(
+        font_kind = (
+            "ordered"
+            if marker.ordered
+            else "hollow"
+            if marker.label == "○"
+            else "bullet"
+        )
+        cache_key = (
+            marker.label,
+            font_kind,
             marker_width,
-            marker_height / 2,
+            marker_height,
+            marker_font_size,
+        )
+        cached_image = self._list_marker_image_cache.get(cache_key)
+        if cached_image is not None:
+            return cached_image
+
+        windows_directory = Path(os.environ.get("WINDIR", r"C:\Windows"))
+        marker_font_path = windows_directory / "Fonts" / "segoeuib.ttf"
+        if marker_font_path.is_file():
+            pillow_font = ImageFont.truetype(str(marker_font_path), marker_font_size)
+        elif self._bundled_font_paths:
+            pillow_font = ImageFont.truetype(
+                str(self._bundled_font_paths[0]),
+                marker_font_size,
+            )
+        else:
+            pillow_font = ImageFont.load_default(size=marker_font_size)
+
+        image = Image.new("RGBA", (marker_width, marker_height), (255, 255, 255, 0))
+        ImageDraw.Draw(image).text(
+            (marker_width, marker_height / 2),
             text=marker.label,
             fill="#111827",
-            font=marker_font,
-            anchor="e",
-            tags=("list_marker_label",),
+            font=pillow_font,
+            anchor="rm",
         )
-        return canvas
+        photo = ImageTk.PhotoImage(image, master=self.root)
+        self._list_marker_image_cache[cache_key] = photo
+        return photo
 
     def _list_marker_font(self, marker: ListMarker) -> tkfont.Font:
         if marker.ordered:
@@ -1860,6 +1921,25 @@ class MarkdownQuickMemoApp:
         self._on_cursor_moved()
         return "break"
 
+    def _activate_list_marker_image(self, event: tk.Event) -> str | None:
+        self._cancel_scroll_animation()
+        clicked_index = self.editor.index(f"@{event.x},{event.y}")
+        image_name = next(
+            (
+                record.image_name
+                for record in self._decoration_records
+                if record.image_name is not None
+                and self.editor.compare(clicked_index, "==", record.image_name)
+            ),
+            None,
+        )
+        if image_name is None:
+            return None
+        self.editor.mark_set("insert", f"{image_name} + 1c")
+        self.editor.focus_set()
+        self._on_cursor_moved()
+        return "break"
+
     def _forward_editor_mousewheel(self, event: tk.Event) -> str | None:
         delta = int(getattr(event, "delta", 0))
         if delta == 0:
@@ -1874,19 +1954,65 @@ class MarkdownQuickMemoApp:
         viewport_height = max(1, self.editor.winfo_height())
         fraction_delta = direction * scroll_pixels * visible_fraction / viewport_height
         maximum_first = max(0.0, 1.0 - visible_fraction)
-        self.editor.yview_moveto(min(max(first + fraction_delta, 0.0), maximum_first))
+        current_target = (
+            self._scroll_animation_target_fraction
+            if self._scroll_animation_target_fraction is not None
+            else first
+        )
+        target = min(max(current_target + fraction_delta, 0.0), maximum_first)
+        if target == first and self._scroll_animation_job is None:
+            return "break"
+
+        self._scroll_animation_start_fraction = first
+        self._scroll_animation_target_fraction = target
+        self._scroll_animation_started_at = monotonic()
+        if self._scroll_animation_job is None:
+            self._scroll_animation_job = self.root.after(
+                EDITOR_SCROLL_ANIMATION_FRAME_MS,
+                self._animate_editor_scroll,
+            )
         return "break"
+
+    def _animate_editor_scroll(self) -> None:
+        self._scroll_animation_job = None
+        target = self._scroll_animation_target_fraction
+        if target is None:
+            return
+
+        elapsed_ms = (monotonic() - self._scroll_animation_started_at) * 1000
+        progress = min(max(elapsed_ms / EDITOR_SCROLL_ANIMATION_DURATION_MS, 0.0), 1.0)
+        eased_progress = 1.0 - (1.0 - progress) ** 3
+        position = self._scroll_animation_start_fraction + (
+            target - self._scroll_animation_start_fraction
+        ) * eased_progress
+        self.editor.yview_moveto(position)
+
+        if progress >= 1.0:
+            self._scroll_animation_target_fraction = None
+            return
+        self._scroll_animation_job = self.root.after(
+            EDITOR_SCROLL_ANIMATION_FRAME_MS,
+            self._animate_editor_scroll,
+        )
+
+    def _cancel_scroll_animation(self) -> None:
+        if self._scroll_animation_job is not None:
+            try:
+                self.root.after_cancel(self._scroll_animation_job)
+            except tk.TclError:
+                pass
+        self._scroll_animation_job = None
+        self._scroll_animation_target_fraction = None
+
+    def _cancel_scroll_on_input(self, _event: tk.Event | None = None) -> None:
+        self._cancel_scroll_animation()
+
+    def _on_editor_scrollbar(self, *arguments: str) -> None:
+        self._cancel_scroll_animation()
+        self.editor.yview(*arguments)
 
     def _on_editor_yview_changed(self, first: str, last: str) -> None:
         self._editor_scrollbar.set(first, last)
-        if self._scroll_redraw_job is None:
-            self._scroll_redraw_job = self.root.after_idle(self._flush_editor_scroll_redraw)
-
-    def _flush_editor_scroll_redraw(self) -> None:
-        try:
-            self.editor.update_idletasks()
-        finally:
-            self._scroll_redraw_job = None
 
     def _highlight_current_line(self) -> None:
         current_ranges = self.editor.tag_ranges("current_line")
@@ -2108,13 +2234,14 @@ class MarkdownQuickMemoApp:
     def hide_window(self, _event: tk.Event | None = None) -> str:
         """Hide the window while preserving the current memo in memory."""
 
+        self._cancel_scroll_animation()
         self.root.withdraw()
         return self._break()
 
     def _cancel_scheduled_jobs(self) -> None:
+        self._cancel_scroll_animation()
         for attribute in (
             "_render_job",
-            "_scroll_redraw_job",
             "_resize_job",
             "_math_preload_job",
             "_script_font_tag_job",
