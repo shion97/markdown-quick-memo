@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+dist-web/
+node_modules/
+src-tauri/target/
+src-tauri/gen/
 *.spec
 .coverage
 htmlcov/
