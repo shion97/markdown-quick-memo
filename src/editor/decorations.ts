@@ -101,6 +101,28 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
+class QuoteMarkerWidget extends WidgetType {
+  constructor(private readonly depth: number) {
+    super();
+  }
+
+  eq(other: QuoteMarkerWidget): boolean {
+    return this.depth === other.depth;
+  }
+
+  toDOM(): HTMLElement {
+    const markers = document.createElement("span");
+    markers.className = "mqm-quote-markers";
+    markers.setAttribute("aria-label", `引用レベル${this.depth}`);
+    for (let level = 0; level < this.depth; level += 1) {
+      const marker = document.createElement("span");
+      marker.className = "mqm-quote-marker";
+      markers.append(marker);
+    }
+    return markers;
+  }
+}
+
 class RuleWidget extends WidgetType {
   toDOM(): HTMLElement {
     const rule = document.createElement("div");
@@ -154,20 +176,75 @@ class TableWidget extends WidgetType {
   }
 }
 
-function appendTableCellContent(cell: HTMLElement, source: string): void {
-  const math = findMathRanges(source);
+interface InlineCodeRange extends ProtectedRange {
+  content: string;
+}
+
+function findInlineCodeRanges(source: string): InlineCodeRange[] {
+  const ranges: InlineCodeRange[] = [];
   let position = 0;
-  for (const range of math) {
-    cell.append(document.createTextNode(source.slice(position, range.from)));
-    const mathElement = document.createElement("span");
-    mathElement.className = "mqm-math-inline";
-    try {
-      mathElement.innerHTML = renderMath(range.expression, false);
-    } catch {
-      mathElement.textContent = source.slice(range.from, range.to);
-      mathElement.classList.add("mqm-math-fallback");
+  while (position < source.length) {
+    if (source[position] !== "`") {
+      position += 1;
+      continue;
     }
-    cell.append(mathElement);
+    let markerLength = 1;
+    while (source[position + markerLength] === "`") {
+      markerLength += 1;
+    }
+    const marker = "`".repeat(markerLength);
+    const contentFrom = position + markerLength;
+    const closing = source.indexOf(marker, contentFrom);
+    if (closing < 0) {
+      position = contentFrom;
+      continue;
+    }
+    let content = source.slice(contentFrom, closing);
+    if (
+      content.startsWith(" ") &&
+      content.endsWith(" ") &&
+      content.trim().length > 0
+    ) {
+      content = content.slice(1, -1);
+    }
+    ranges.push({
+      from: position,
+      to: closing + markerLength,
+      content,
+    });
+    position = closing + markerLength;
+  }
+  return ranges;
+}
+
+function appendTableCellContent(cell: HTMLElement, source: string): void {
+  const inlineCode = findInlineCodeRanges(source);
+  const ranges = [
+    ...inlineCode.map((range) => ({ ...range, kind: "code" as const })),
+    ...findMathRanges(source, 0, inlineCode).map((range) => ({
+      ...range,
+      kind: "math" as const,
+    })),
+  ].sort((left, right) => left.from - right.from);
+  let position = 0;
+  for (const range of ranges) {
+    cell.append(document.createTextNode(source.slice(position, range.from)));
+    if (range.kind === "code") {
+      const codeElement = document.createElement("code");
+      codeElement.className = "mqm-inline-code";
+      codeElement.textContent = range.content;
+      cell.append(codeElement);
+    } else {
+      const mathElement = document.createElement("span");
+      mathElement.className = "mqm-math-inline";
+      try {
+        mathElement.innerHTML = renderMath(range.expression, false);
+      } catch {
+        mathElement.textContent = source.slice(range.from, range.to);
+        mathElement.classList.add("mqm-math-fallback");
+      }
+      cell.append(mathElement);
+    }
     position = range.to;
   }
   cell.append(document.createTextNode(source.slice(position)));
@@ -361,7 +438,8 @@ function lineDecorations(
       lineNumber += 1;
       continue;
     }
-    if (!selectionTouches(state, line.from, line.to)) {
+    const lineIsActive = selectionTouches(state, line.from, line.to);
+    if (!lineIsActive) {
       const heading = /^(#{1,6})(\s+)/.exec(line.text);
       if (heading) {
         const level = heading[1]?.length ?? 1;
@@ -448,16 +526,44 @@ function lineDecorations(
         results.push({
           from,
           to: from + markers.length,
-          decoration: Decoration.replace({}),
+          decoration: Decoration.replace({
+            widget: new QuoteMarkerWidget(depth),
+          }),
         });
         results.push({
           from: line.from,
           to: line.from,
           decoration: Decoration.line({
+            attributes: { class: "mqm-quote-line" },
+          }),
+        });
+      }
+    }
+    if (lineIsActive) {
+      const activeList =
+        /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
+          line.text,
+        );
+      if (activeList) {
+        const indent = activeList[2] ?? "";
+        const visualIndent = indent.replace(/\t/g, "  ").length;
+        results.push({
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.line({
             attributes: {
-              class: "mqm-quote-line",
-              style: `--mqm-quote-depth: ${depth}`,
+              class: "mqm-list-line",
+              style: `--mqm-list-indent: ${visualIndent}ch`,
             },
+          }),
+        });
+      }
+      if (/^([ \t]*)((?:>[ \t]?)+)/.test(line.text)) {
+        results.push({
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.line({
+            attributes: { class: "mqm-quote-line" },
           }),
         });
       }
@@ -477,6 +583,17 @@ function inlineMarkerDecorations(
     from: segment.from,
     to: segment.to,
     enter: (node) => {
+      if (
+        node.name === "Emphasis" &&
+        !selectionTouches(state, node.from, node.to) &&
+        node.to - node.from > 2
+      ) {
+        results.push({
+          from: node.from + 1,
+          to: node.to - 1,
+          decoration: Decoration.mark({ class: "mqm-emphasis-content" }),
+        });
+      }
       if (node.name === "InlineCode") {
         if (selectionTouches(state, node.from, node.to)) {
           return false;

@@ -18,7 +18,15 @@ describe("continuationForLine", () => {
     expect(continuationForLine("> - ", 4)).toEqual({
       replacementFrom: 2,
       replacementTo: 4,
-      inserted: "\n> ",
+      inserted: "",
+    });
+  });
+
+  it("空のリストでは余分な改行を追加せず記号だけを削除する", () => {
+    expect(continuationForLine("- ", 2)).toEqual({
+      replacementFrom: 0,
+      replacementTo: 2,
+      inserted: "",
     });
   });
 

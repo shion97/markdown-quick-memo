@@ -202,6 +202,7 @@ button.primary:hover {
 .mqm-list-line {
   --mqm-list-prefix-width: calc(var(--mqm-list-indent, 0ch) + 2.75em);
   padding-left: var(--mqm-list-prefix-width) !important;
+  overflow-wrap: anywhere;
   text-indent: calc(0px - var(--mqm-list-prefix-width));
 }
 
@@ -234,10 +235,23 @@ button.primary:hover {
 }
 
 .mqm-quote-line {
-  border-left: calc(var(--mqm-quote-depth) * 2px) solid
-    color-mix(in srgb, var(--accent) 38%, var(--border));
-  padding-left: calc(var(--mqm-quote-depth) * 0.7em) !important;
+  background: color-mix(in srgb, var(--surface-muted) 82%, var(--muted) 18%);
   color: color-mix(in srgb, var(--text) 80%, var(--muted));
+}
+
+.mqm-quote-markers {
+  display: inline-flex;
+  height: 1.75em;
+  margin-right: 0.25em;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.mqm-quote-marker {
+  display: inline-block;
+  width: 1em;
+  height: 100%;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
 .mqm-table {
@@ -276,6 +290,10 @@ button.primary:hover {
   background: var(--surface-muted);
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.9em;
+}
+
+.mqm-emphasis-content {
+  font-style: italic;
 }
 
 .mqm-code-block-line {

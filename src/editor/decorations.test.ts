@@ -43,7 +43,7 @@ describe("markdownDecorations", () => {
       "",
       "| 項目 | 値 |",
       "| --- | --- |",
-      "| A | 1 |",
+      "| `code` | 1 |",
       "",
       "---",
       "",
@@ -51,6 +51,8 @@ describe("markdownDecorations", () => {
       "- [x] 完了",
       "",
       "`inline`",
+      "",
+      "*italic*",
       "",
       "```ts",
       "const value = 1;",
@@ -63,10 +65,20 @@ describe("markdownDecorations", () => {
 
     expect(parent.querySelector(".mqm-math-display .katex")).not.toBeNull();
     expect(parent.querySelector("table.mqm-table")).not.toBeNull();
+    expect(
+      parent.querySelector("table.mqm-table .mqm-inline-code")?.textContent,
+    ).toBe("code");
     expect(parent.querySelector(".mqm-horizontal-rule")).not.toBeNull();
     expect(parent.querySelectorAll(".mqm-checkbox")).toHaveLength(2);
     expect(parent.querySelector(".mqm-checkbox-checked")).not.toBeNull();
-    expect(parent.querySelector(".mqm-inline-code")?.textContent).toBe("inline");
+    const inlineCodeValues = Array.from(
+      parent.querySelectorAll(".mqm-inline-code"),
+      (element) => element.textContent,
+    );
+    expect(inlineCodeValues).toEqual(["code", "inline"]);
+    expect(parent.querySelector(".mqm-emphasis-content")?.textContent).toBe(
+      "italic",
+    );
     expect(parent.querySelectorAll(".mqm-code-block-line")).toHaveLength(3);
     expect(parent.querySelector(".mqm-code-language")?.textContent).toBe("ts");
   });
@@ -82,5 +94,15 @@ describe("markdownDecorations", () => {
     const parent = renderDocument("# 見出し\n\nカーソル位置");
 
     expect(parent.querySelector(".mqm-heading-1")?.textContent).toBe("見出し");
+  });
+
+  it("引用階層ごとに一文字幅で縦線を追加する", () => {
+    const parent = renderDocument(
+      "> 一階層\n> > 二階層\n> > > 三階層\n\nカーソル位置",
+    );
+
+    expect(parent.querySelectorAll(".mqm-quote-line")).toHaveLength(3);
+    expect(parent.querySelectorAll(".mqm-quote-markers")).toHaveLength(3);
+    expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(6);
   });
 });

@@ -29,7 +29,7 @@ export function continuationForLine(
       return {
         replacementFrom: quote.length,
         replacementTo: beforeCursor.length,
-        inserted: quote ? `\n${quote}` : "\n",
+        inserted: "",
       };
     }
     const nextMarker = /^\d/.test(marker) ? "1." : marker;
