@@ -15,8 +15,8 @@ import {
 } from "./editor/editor";
 import {
   buildOutlineTree,
-  extractOutline,
   navigateToHeading,
+  requestCompleteOutline,
   type OutlineHeading,
   type OutlineNode,
 } from "./editor/outline";
@@ -223,6 +223,13 @@ export class MarkdownQuickMemoApplication {
   }
 
   private bindActions(): void {
+    this.root.addEventListener(
+      "keydown",
+      (event) => {
+        this.handleOutlineWidthShortcut(event);
+      },
+      { capture: true },
+    );
     this.root.addEventListener("click", (event) => {
       const outlineToggle = (
         event.target as HTMLElement
@@ -346,6 +353,29 @@ export class MarkdownQuickMemoApplication {
       event.preventDefault();
       this.insertTable();
     }
+  }
+
+  private handleOutlineWidthShortcut(event: KeyboardEvent): void {
+    if (
+      !event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      event.metaKey ||
+      (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+    ) {
+      return;
+    }
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.matches("input, textarea, select")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.updateOutlineWidth(
+      event.key === "ArrowLeft" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
+    );
   }
 
   private async newDocument(): Promise<void> {
@@ -567,7 +597,9 @@ export class MarkdownQuickMemoApplication {
     const head = this.editor.state.selection.main.head;
     const line = this.editor.state.doc.lineAt(head);
     this.cursorPosition.textContent = `${line.number}行 ${head - line.from + 1}列`;
-    this.renderOutline(extractOutline(this.editor.state));
+    requestCompleteOutline(this.editor, (headings) => {
+      this.renderOutline(headings);
+    });
   }
 
   private renderOutline(headings: OutlineHeading[]): void {

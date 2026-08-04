@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { forceParsing, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
@@ -12,6 +12,9 @@ export interface OutlineNode extends OutlineHeading {
   key: string;
   children: OutlineNode[];
 }
+
+const OUTLINE_PARSE_SLICE_MS = 30;
+const OUTLINE_PARSE_RETRY_MS = 16;
 
 export function extractOutline(state: EditorState): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
@@ -35,6 +38,30 @@ export function extractOutline(state: EditorState): OutlineHeading[] {
     },
   });
   return headings;
+}
+
+export function requestCompleteOutline(
+  view: EditorView,
+  onComplete: (headings: OutlineHeading[]) => void,
+): () => void {
+  const document = view.state.doc;
+  let cancelled = false;
+
+  const continueParsing = (): void => {
+    if (cancelled || view.state.doc !== document) {
+      return;
+    }
+    if (forceParsing(view, document.length, OUTLINE_PARSE_SLICE_MS)) {
+      onComplete(extractOutline(view.state));
+      return;
+    }
+    window.setTimeout(continueParsing, OUTLINE_PARSE_RETRY_MS);
+  };
+
+  continueParsing();
+  return () => {
+    cancelled = true;
+  };
 }
 
 export function buildOutlineTree(headings: readonly OutlineHeading[]): OutlineNode[] {

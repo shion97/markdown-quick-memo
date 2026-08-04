@@ -4,8 +4,13 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
-import { afterEach, describe, expect, it } from "vitest";
-import { buildOutlineTree, extractOutline, navigateToHeading } from "./outline";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildOutlineTree,
+  extractOutline,
+  navigateToHeading,
+  requestCompleteOutline,
+} from "./outline";
 
 const views: EditorView[] = [];
 
@@ -22,6 +27,7 @@ function createState(source: string): EditorState {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const view of views.splice(0)) {
     view.destroy();
   }
@@ -64,6 +70,35 @@ describe("extractOutline", () => {
     expect(extractOutline(createState(source))).toEqual([
       { level: 1, label: "同名", position: 0 },
       { level: 1, label: "同名", position: source.lastIndexOf("#") },
+    ]);
+  });
+
+  it("大きい文書を末尾まで解析して見出しを抽出する", () => {
+    vi.useFakeTimers();
+    const parent = document.createElement("div");
+    document.body.append(parent);
+    const tailHeading = "# 末尾見出し";
+    const source = [
+      ...Array.from({ length: 30_000 }, (_, index) => `本文 ${index}`),
+      tailHeading,
+    ].join("\n");
+    const view = new EditorView({ state: createState(source), parent });
+    views.push(view);
+    let headings: ReturnType<typeof extractOutline> | undefined;
+
+    requestCompleteOutline(view, (completedHeadings) => {
+      headings = completedHeadings;
+    });
+    for (let attempt = 0; attempt < 100 && !headings; attempt += 1) {
+      vi.advanceTimersByTime(16);
+    }
+
+    expect(headings).toEqual([
+      {
+        level: 1,
+        label: "末尾見出し",
+        position: source.indexOf(tailHeading),
+      },
     ]);
   });
 });

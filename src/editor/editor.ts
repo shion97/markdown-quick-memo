@@ -1,8 +1,14 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
-import { searchKeymap } from "@codemirror/search";
-import { EditorState, type Extension } from "@codemirror/state";
+import {
+  closeSearchPanel,
+  openSearchPanel,
+  search,
+  searchKeymap,
+  searchPanelOpen,
+} from "@codemirror/search";
+import { EditorState, Prec, type Extension } from "@codemirror/state";
 import {
   drawSelection,
   dropCursor,
@@ -15,7 +21,7 @@ import {
 import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
 import { markdownInputAssistance } from "./input-assistance";
-import { extractOutline, type OutlineHeading } from "./outline";
+import { requestCompleteOutline, type OutlineHeading } from "./outline";
 
 export interface EditorCallbacks {
   onDocumentChanged: (content: string) => void;
@@ -26,6 +32,28 @@ export interface EditorCallbacks {
 }
 
 const editorExtensions = new WeakMap<EditorView, readonly Extension[]>();
+
+const japaneseSearchPhrases: Record<string, string> = {
+  Find: "検索",
+  Replace: "置換",
+  next: "次へ",
+  previous: "前へ",
+  all: "すべて選択",
+  "match case": "大文字・小文字を区別",
+  regexp: "正規表現",
+  "by word": "単語単位",
+  replace: "置換",
+  "replace all": "すべて置換",
+  close: "閉じる",
+  "current match": "現在の一致",
+  "on line": "行",
+};
+
+function toggleSearchPanel(view: EditorView): boolean {
+  return searchPanelOpen(view.state)
+    ? closeSearchPanel(view)
+    : openSearchPanel(view);
+}
 
 function editorTheme(): Extension {
   return EditorView.theme({
@@ -80,6 +108,7 @@ export function createEditor(
   callbacks: EditorCallbacks,
 ): EditorView {
   let countTimer: number | undefined;
+  let cancelOutlineRefresh: (() => void) | undefined;
   const extensions: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -91,6 +120,17 @@ export function createEditor(
       extensions: [GFM],
     }),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    EditorState.phrases.of(japaneseSearchPhrases),
+    search({ top: true }),
+    Prec.highest(
+      keymap.of([
+        {
+          key: "Mod-f",
+          run: toggleSearchPanel,
+          scope: "editor search-panel",
+        },
+      ]),
+    ),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     markdownInputAssistance(),
     markdownDecorations,
@@ -114,7 +154,11 @@ export function createEditor(
       countTimer = window.setTimeout(() => {
         const counts = documentCounts(content);
         callbacks.onCountsChanged(counts.characters, counts.words);
-        callbacks.onOutlineChanged(extractOutline(update.state));
+        cancelOutlineRefresh?.();
+        cancelOutlineRefresh = requestCompleteOutline(
+          update.view,
+          callbacks.onOutlineChanged,
+        );
       }, 120);
     }),
     EditorView.domEventHandlers({

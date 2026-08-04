@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 
+import { searchPanelOpen } from "@codemirror/search";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownQuickMemoApplication } from "./app";
+
+if (!window.Range.prototype.getClientRects) {
+  Object.defineProperty(window.Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [],
+  });
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -163,6 +171,94 @@ describe("MarkdownQuickMemoApplication", () => {
 
     shrink?.click();
     expect(workspace?.style.getPropertyValue("--outline-width")).toBe("440px");
+  });
+
+  it("Ctrlと左右キーで目次幅を変更し、入力欄では横移動を維持する", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const workspace = root.querySelector<HTMLElement>("#workspace")!;
+    const editorContent = root.querySelector<HTMLElement>(".cm-content")!;
+    const hotkeyInput = root.querySelector<HTMLInputElement>("#hotkey-input")!;
+
+    const expandEvent = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    editorContent.dispatchEvent(expandEvent);
+    expect(expandEvent.defaultPrevented).toBe(true);
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("280px");
+
+    editorContent.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+
+    hotkeyInput.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowLeft",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+  });
+
+  it("日本語検索パネルをCtrl+Fで開閉し、現行の検索・置換機能を維持する", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    view.dispatch({ changes: { from: 0, insert: "先頭 日本語 末尾 日本語" } });
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "f",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(searchPanelOpen(view.state)).toBe(true);
+    const searchInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='search']",
+    )!;
+    expect(searchInput.placeholder).toBe("検索");
+    expect(root.querySelector(".cm-search")?.textContent).toContain("次へ");
+    expect(root.querySelector(".cm-search")?.textContent).toContain("前へ");
+    expect(root.querySelector(".cm-search")?.textContent).toContain("すべて置換");
+    expect(root.querySelector(".cm-search input[name='replace']")).not.toBeNull();
+    expect(root.querySelector(".cm-search input[name='case']")).not.toBeNull();
+    expect(root.querySelector(".cm-search input[name='re']")).not.toBeNull();
+    expect(root.querySelector(".cm-search input[name='word']")).not.toBeNull();
+
+    searchInput.value = "日本語";
+    searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>(
+      ".cm-search button[name='next']",
+    )?.click();
+    const selection = view.state.selection.main;
+    expect(view.state.sliceDoc(selection.from, selection.to)).toBe("日本語");
+
+    searchInput.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "f",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(searchPanelOpen(view.state)).toBe(false);
   });
 
   it("三点メニューを外側クリックで閉じる", () => {
