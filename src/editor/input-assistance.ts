@@ -147,16 +147,12 @@ function handleTab(view: EditorView, remove: boolean): boolean {
   return true;
 }
 
-function pairInputHandler(
+export function createPairInputHandler(): (
   view: EditorView,
   from: number,
   to: number,
   text: string,
-): boolean {
-  if (view.composing) {
-    return false;
-  }
-
+) => boolean {
   const pairs: Record<string, string> = {
     "(": ")",
     "[": "]",
@@ -165,49 +161,75 @@ function pairInputHandler(
     "'": "'",
     "`": "`",
   };
-  const closing = pairs[text];
-  if (!closing) {
-    return false;
-  }
+  let pendingClosing: { character: string; position: number } | undefined;
+  let skippedClosingCharacter: string | undefined;
 
-  if (text === "`" && view.state.doc.sliceString(Math.max(0, from - 2), from) === "``") {
+  return (view, from, to, text) => {
+    const expectedClosing = pendingClosing;
+    const previouslySkippedClosing = skippedClosingCharacter;
+    pendingClosing = undefined;
+    skippedClosingCharacter = undefined;
+    if (view.composing) {
+      return false;
+    }
+    if (text === previouslySkippedClosing) {
+      return false;
+    }
+    if (
+      expectedClosing &&
+      text === expectedClosing.character &&
+      from === to &&
+      from === expectedClosing.position &&
+      view.state.doc.sliceString(from, from + 1) === expectedClosing.character
+    ) {
+      view.dispatch({ selection: { anchor: from + 1 } });
+      skippedClosingCharacter = text;
+      return true;
+    }
+
+    const closing = pairs[text];
+    if (!closing) {
+      return false;
+    }
+
+    if (
+      text === "`" &&
+      view.state.doc.sliceString(Math.max(0, from - 2), from) === "``"
+    ) {
+      view.dispatch({
+        changes: { from, to, insert: "`\n\n```" },
+        selection: { anchor: from + 2 },
+        userEvent: "input",
+      });
+      return true;
+    }
+
+    const selection = view.state.selection.main;
+    if (!selection.empty) {
+      const selected = view.state.doc.sliceString(selection.from, selection.to);
+      view.dispatch({
+        changes: {
+          from: selection.from,
+          to: selection.to,
+          insert: `${text}${selected}${closing}`,
+        },
+        selection: EditorSelection.range(
+          selection.from + 1,
+          selection.to + 1,
+        ),
+        userEvent: "input",
+      });
+      return true;
+    }
+
     view.dispatch({
-      changes: { from, to, insert: "`\n\n```" },
-      selection: { anchor: from + 2 },
+      changes: { from, to, insert: `${text}${closing}` },
+      selection: { anchor: from + 1 },
       userEvent: "input",
     });
+    pendingClosing = { character: closing, position: from + 1 };
     return true;
-  }
-
-  const selection = view.state.selection.main;
-  if (!selection.empty) {
-    const selected = view.state.doc.sliceString(selection.from, selection.to);
-    view.dispatch({
-      changes: {
-        from: selection.from,
-        to: selection.to,
-        insert: `${text}${selected}${closing}`,
-      },
-      selection: EditorSelection.range(
-        selection.from + 1,
-        selection.to + 1,
-      ),
-      userEvent: "input",
-    });
-    return true;
-  }
-
-  const next = view.state.doc.sliceString(from, from + 1);
-  if (next === closing && text === closing) {
-    view.dispatch({ selection: { anchor: from + 1 } });
-    return true;
-  }
-  view.dispatch({
-    changes: { from, to, insert: `${text}${closing}` },
-    selection: { anchor: from + 1 },
-    userEvent: "input",
-  });
-  return true;
+  };
 }
 
 export function markdownInputAssistance(): Extension {
@@ -228,6 +250,6 @@ export function markdownInputAssistance(): Extension {
         { key: "Shift-ArrowDown", run: selectLineDown },
       ]),
     ),
-    EditorView.inputHandler.of(pairInputHandler),
+    EditorView.inputHandler.of(createPairInputHandler()),
   ];
 }

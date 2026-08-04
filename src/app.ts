@@ -1,7 +1,7 @@
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   backend,
-  nextBackendPayload,
+  invokeWithBackendPayload,
   onBackendEvent,
   onBackendPayload,
   type DocumentPayload,
@@ -73,6 +73,9 @@ export class MarkdownQuickMemoApplication {
   private translucent = false;
   private outlineWidth = OUTLINE_MIN_WIDTH;
   private readonly collapsedOutlineKeys = new Set<string>();
+  private outlineNavigationActive = false;
+  private selectedOutlineKey: string | null = null;
+  private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
     this.root.innerHTML = this.layout();
@@ -178,6 +181,7 @@ export class MarkdownQuickMemoApplication {
             <section class="popover-group" aria-labelledby="shortcut-window-heading">
               <h2 id="shortcut-window-heading">表示・終了</h2>
               <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
+              <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+Shift+L</kbd></div>
               <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
@@ -226,10 +230,17 @@ export class MarkdownQuickMemoApplication {
     this.root.addEventListener(
       "keydown",
       (event) => {
+        this.handleOutlineNavigationShortcut(event);
         this.handleOutlineWidthShortcut(event);
       },
       { capture: true },
     );
+    this.root.addEventListener("keyup", (event) => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        this.resetOutlineNavigationHold();
+      }
+    });
+    window.addEventListener("blur", () => this.resetOutlineNavigationHold());
     this.root.addEventListener("click", (event) => {
       const outlineToggle = (
         event.target as HTMLElement
@@ -242,6 +253,9 @@ export class MarkdownQuickMemoApplication {
         "button[data-heading-position]",
       );
       if (heading) {
+        if (this.outlineNavigationActive) {
+          this.selectOutlineButton(heading, false);
+        }
         navigateToHeading(
           this.editor,
           Number(heading.dataset.headingPosition),
@@ -313,7 +327,12 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     const key = event.key.toLowerCase();
-    if (key === "q") {
+    if (key === "l" && event.shiftKey) {
+      event.preventDefault();
+      if (!event.repeat) {
+        this.toggleOutlineNavigation();
+      }
+    } else if (key === "q") {
       event.preventDefault();
       await backend.hideWindow();
     } else if (key === "s" && event.shiftKey) {
@@ -376,6 +395,33 @@ export class MarkdownQuickMemoApplication {
     this.updateOutlineWidth(
       event.key === "ArrowLeft" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
     );
+  }
+
+  private handleOutlineNavigationShortcut(event: KeyboardEvent): void {
+    if (
+      !this.outlineNavigationActive ||
+      !event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      event.metaKey ||
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = Date.now();
+    if (
+      !event.repeat ||
+      !this.outlineNavigationHold ||
+      this.outlineNavigationHold.key !== event.key
+    ) {
+      this.outlineNavigationHold = { key: event.key, startedAt: now };
+    }
+    const elapsed = now - this.outlineNavigationHold.startedAt;
+    const distance = elapsed >= 1_200 ? 4 : elapsed >= 600 ? 2 : 1;
+    this.moveOutlineSelection(event.key === "ArrowDown" ? distance : -distance);
   }
 
   private async newDocument(): Promise<void> {
@@ -508,12 +554,11 @@ export class MarkdownQuickMemoApplication {
         printRoot,
         backend.localImageData,
       );
-      const completion = await nextBackendPayload<PdfExportCompleted>(
+      const result = await invokeWithBackendPayload<PdfExportCompleted>(
         "pdf-export-completed",
         60_000,
+        () => backend.exportPdf(target.path),
       );
-      await backend.exportPdf(target.path);
-      const result = await completion;
       if (!result.success) {
         throw new Error(result.error ?? "PDF出力に失敗しました。");
       }
@@ -621,6 +666,11 @@ export class MarkdownQuickMemoApplication {
     const hasOutline = headings.length > 0;
     this.outline.hidden = !hasOutline;
     this.workspace.classList.toggle("has-outline", hasOutline);
+    if (!hasOutline && this.outlineNavigationActive) {
+      this.stopOutlineNavigation();
+    } else if (hasOutline && this.outlineNavigationActive) {
+      this.refreshOutlineNavigationSelection();
+    }
   }
 
   private renderOutlineNodes(nodes: readonly OutlineNode[]): HTMLElement[] {
@@ -658,6 +708,7 @@ export class MarkdownQuickMemoApplication {
       button.className = "outline-item";
       button.textContent = node.label;
       button.dataset.headingPosition = String(node.position);
+      button.dataset.outlineKey = node.key;
       button.title = node.label;
       row.append(button);
       container.append(row);
@@ -695,6 +746,110 @@ export class MarkdownQuickMemoApplication {
     } else {
       this.collapsedOutlineKeys.delete(key);
     }
+    if (this.outlineNavigationActive) {
+      this.refreshOutlineNavigationSelection();
+    }
+  }
+
+  private toggleOutlineNavigation(): void {
+    if (this.outlineNavigationActive) {
+      this.stopOutlineNavigation();
+      return;
+    }
+    const [first] = this.visibleOutlineButtons();
+    if (!first) {
+      return;
+    }
+    this.outlineNavigationActive = true;
+    this.outline.classList.add("outline-navigation-active");
+    this.selectOutlineButton(first, true);
+  }
+
+  private stopOutlineNavigation(): void {
+    this.outlineNavigationActive = false;
+    this.selectedOutlineKey = null;
+    this.outline.classList.remove("outline-navigation-active");
+    this.resetOutlineNavigationHold();
+    this.applyOutlineSelectionState();
+    this.editor.focus();
+  }
+
+  private moveOutlineSelection(offset: number): void {
+    const buttons = this.visibleOutlineButtons();
+    if (buttons.length === 0) {
+      this.stopOutlineNavigation();
+      return;
+    }
+    const selectedIndex = buttons.findIndex(
+      (button) => button.dataset.outlineKey === this.selectedOutlineKey,
+    );
+    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const nextIndex = Math.min(
+      buttons.length - 1,
+      Math.max(0, currentIndex + offset),
+    );
+    this.selectOutlineButton(buttons[nextIndex]!, true);
+  }
+
+  private refreshOutlineNavigationSelection(): void {
+    const buttons = this.visibleOutlineButtons();
+    const selected = buttons.find(
+      (button) => button.dataset.outlineKey === this.selectedOutlineKey,
+    );
+    this.selectedOutlineKey = (selected ?? buttons[0])?.dataset.outlineKey ?? null;
+    this.applyOutlineSelectionState();
+  }
+
+  private selectOutlineButton(
+    button: HTMLButtonElement,
+    navigate: boolean,
+  ): void {
+    this.selectedOutlineKey = button.dataset.outlineKey ?? null;
+    this.applyOutlineSelectionState();
+    if (typeof button.scrollIntoView === "function") {
+      button.scrollIntoView({ block: "nearest" });
+    }
+    if (navigate) {
+      navigateToHeading(
+        this.editor,
+        Number(button.dataset.headingPosition),
+      );
+    }
+  }
+
+  private applyOutlineSelectionState(): void {
+    for (const button of this.outlineList.querySelectorAll<HTMLButtonElement>(
+      ".outline-item",
+    )) {
+      const selected =
+        this.outlineNavigationActive &&
+        button.dataset.outlineKey === this.selectedOutlineKey;
+      button.classList.toggle("outline-item-selected", selected);
+      if (selected) {
+        button.setAttribute("aria-current", "location");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    }
+  }
+
+  private visibleOutlineButtons(): HTMLButtonElement[] {
+    return Array.from(
+      this.outlineList.querySelectorAll<HTMLButtonElement>(".outline-item"),
+    ).filter((button) => {
+      let ancestor = button.parentElement;
+      while (ancestor && ancestor !== this.outlineList) {
+        if (ancestor.hidden) {
+          return false;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
+  }
+
+  private resetOutlineNavigationHold(): void {
+    this.outlineNavigationHold = null;
   }
 
   private updateOutlineWidth(delta: number): void {

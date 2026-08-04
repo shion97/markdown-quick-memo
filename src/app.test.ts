@@ -63,6 +63,7 @@ describe("MarkdownQuickMemoApplication", () => {
       "Tab / Shift+Tab",
       "Shift+Enter",
       "Ctrl+クリック",
+      "Ctrl+Shift+L",
     ]) {
       expect(shortcutText).toContain(shortcut);
     }
@@ -142,6 +143,222 @@ describe("MarkdownQuickMemoApplication", () => {
         ?.closest(".outline-node")
         ?.querySelector<HTMLElement>(":scope > .outline-children")?.hidden,
     ).toBe(true);
+  });
+
+  it("Ctrl+Shift+Lで目次操作を切り替え、Ctrlと上下キーで編集位置を移動する", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const source = "# 見出し1\n本文\n# 見出し2";
+    view.dispatch({ changes: { from: 0, insert: source } });
+    vi.advanceTimersByTime(120);
+
+    const startEvent = new KeyboardEvent("keydown", {
+      key: "l",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    view.contentDOM.dispatchEvent(startEvent);
+
+    const outline = root.querySelector<HTMLElement>("#outline")!;
+    expect(startEvent.defaultPrevented).toBe(true);
+    expect(outline.classList.contains("outline-navigation-active")).toBe(true);
+    expect(
+      root.querySelector<HTMLButtonElement>(".outline-item[aria-current='location']")
+        ?.textContent,
+    ).toBe("見出し1");
+    expect(view.state.selection.main.head).toBe(0);
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "l",
+        ctrlKey: true,
+        shiftKey: true,
+        repeat: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(outline.classList.contains("outline-navigation-active")).toBe(true);
+
+    const inputEvent = new KeyboardEvent("keydown", {
+      key: "あ",
+      bubbles: true,
+      cancelable: true,
+    });
+    view.contentDOM.dispatchEvent(inputEvent);
+    expect(inputEvent.defaultPrevented).toBe(false);
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(
+      root.querySelector<HTMLButtonElement>(".outline-item[aria-current='location']")
+        ?.textContent,
+    ).toBe("見出し2");
+    expect(view.state.selection.main.head).toBe(source.indexOf("# 見出し2"));
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowUp",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(view.state.selection.main.head).toBe(0);
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "l",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(outline.classList.contains("outline-navigation-active")).toBe(false);
+    expect(root.querySelector(".outline-item[aria-current]")).toBeNull();
+    expect(view.hasFocus).toBe(true);
+  });
+
+  it("目次操作では折りたたまれた項目を飛ばす", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const source = "# 親\n## 子\n# 次";
+    view.dispatch({ changes: { from: 0, insert: source } });
+    vi.advanceTimersByTime(120);
+    root.querySelector<HTMLButtonElement>("button[data-outline-toggle-key]")?.click();
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "l",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(
+      root.querySelector<HTMLButtonElement>(".outline-item[aria-current='location']")
+        ?.textContent,
+    ).toBe("次");
+    expect(view.state.selection.main.head).toBe(source.indexOf("# 次"));
+  });
+
+  it("目次の上下キー長押しを600ミリ秒と1200ミリ秒で加速する", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const source = Array.from(
+      { length: 10 },
+      (_, index) => `# 見出し${index + 1}`,
+    ).join("\n");
+    view.dispatch({ changes: { from: 0, insert: source } });
+    vi.advanceTimersByTime(120);
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "l",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    const moveDown = (repeat: boolean): void => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          ctrlKey: true,
+          repeat,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    };
+    const selectedLabel = (): string | null =>
+      root.querySelector<HTMLButtonElement>(
+        ".outline-item[aria-current='location']",
+      )?.textContent ?? null;
+
+    moveDown(false);
+    expect(selectedLabel()).toBe("見出し2");
+    vi.advanceTimersByTime(600);
+    moveDown(true);
+    expect(selectedLabel()).toBe("見出し4");
+    vi.advanceTimersByTime(600);
+    moveDown(true);
+    expect(selectedLabel()).toBe("見出し8");
+  });
+
+  it("目次再描画後も選択を維持し、対象が消えたら先頭へ戻す", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const source = "# 見出し1\n# 見出し2";
+    view.dispatch({ changes: { from: 0, insert: source } });
+    vi.advanceTimersByTime(120);
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "l",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    view.dispatch({ changes: { from: source.length, insert: "\n本文" } });
+    vi.advanceTimersByTime(120);
+    expect(
+      root.querySelector<HTMLButtonElement>(".outline-item[aria-current='location']")
+        ?.textContent,
+    ).toBe("見出し2");
+
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "# 見出し1" } });
+    vi.advanceTimersByTime(120);
+    expect(
+      root.querySelector<HTMLButtonElement>(".outline-item[aria-current='location']")
+        ?.textContent,
+    ).toBe("見出し1");
   });
 
   it("目次幅を240pxから480pxまで40px刻みで変更する", () => {
