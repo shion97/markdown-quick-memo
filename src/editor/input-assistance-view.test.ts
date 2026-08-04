@@ -75,7 +75,6 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     ["{", "}"],
     ['"', '"'],
     ["'", "'"],
-    ["`", "`"],
   ])("%sの補完直後に%sを入力すると一度だけ外側へ移動する", (open, close) => {
     const view = createView("");
     const handler = createPairInputHandler();
@@ -109,6 +108,24 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(typeText(view, handler, ")")).toBe(false);
     expect(view.state.doc.toString()).toBe("))");
     expect(view.state.selection.main.head).toBe(1);
+  });
+
+  it("バッククォートを3回入力するとコードブロックを作成する", () => {
+    const view = createView("");
+    const handler = createPairInputHandler();
+
+    expect(typeText(view, handler, "`")).toBe(true);
+    expect(view.state.doc.toString()).toBe("``");
+    expect(view.state.selection.main.head).toBe(1);
+
+    expect(typeText(view, handler, "`")).toBe(true);
+    expect(view.state.doc.toString()).toBe("``");
+    expect(view.state.selection.main.head).toBe(2);
+
+    expect(typeText(view, handler, "`")).toBe(true);
+
+    expect(view.state.doc.toString()).toBe("```\n\n```");
+    expect(view.state.selection.main.head).toBe(4);
   });
 
   it("通常行のTabを本文と選択範囲を変えずに消費する", () => {

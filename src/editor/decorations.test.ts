@@ -121,6 +121,37 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(6);
   });
 
+  it("連続する引用行だけを階層ごとに接続する", () => {
+    const parent = renderDocument(
+      "> 一階層\n> > 二階層\n> 一階層\n\n> 別の引用\n\nカーソル位置",
+    );
+    const markerGroups = Array.from(
+      parent.querySelectorAll<HTMLElement>(".mqm-quote-markers"),
+    );
+
+    expect(markerGroups).toHaveLength(4);
+    expect(
+      markerGroups[0]?.querySelectorAll(".mqm-quote-marker-connect-after"),
+    ).toHaveLength(1);
+    expect(
+      markerGroups[1]?.querySelectorAll(".mqm-quote-marker-connect-before"),
+    ).toHaveLength(1);
+    expect(
+      markerGroups[1]?.querySelectorAll(".mqm-quote-marker-connect-after"),
+    ).toHaveLength(1);
+    expect(
+      markerGroups[2]?.querySelectorAll(".mqm-quote-marker-connect-before"),
+    ).toHaveLength(1);
+    expect(
+      markerGroups[2]?.querySelectorAll(".mqm-quote-marker-connect-after"),
+    ).toHaveLength(0);
+    expect(
+      markerGroups[3]?.querySelectorAll(
+        ".mqm-quote-marker-connect-before, .mqm-quote-marker-connect-after",
+      ),
+    ).toHaveLength(0);
+  });
+
   it("カーソルが斜体内にあっても内容の斜体表示を維持する", () => {
     loadApplicationStyles();
     const parent = renderDocument("*A* と *日本語*", 1);

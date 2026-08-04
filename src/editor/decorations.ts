@@ -102,12 +102,20 @@ class CheckboxWidget extends WidgetType {
 }
 
 class QuoteMarkerWidget extends WidgetType {
-  constructor(private readonly depth: number) {
+  constructor(
+    private readonly depth: number,
+    private readonly previousDepth: number,
+    private readonly nextDepth: number,
+  ) {
     super();
   }
 
   eq(other: QuoteMarkerWidget): boolean {
-    return this.depth === other.depth;
+    return (
+      this.depth === other.depth &&
+      this.previousDepth === other.previousDepth &&
+      this.nextDepth === other.nextDepth
+    );
   }
 
   toDOM(): HTMLElement {
@@ -116,7 +124,18 @@ class QuoteMarkerWidget extends WidgetType {
     markers.setAttribute("aria-label", `引用レベル${this.depth}`);
     for (let level = 0; level < this.depth; level += 1) {
       const marker = document.createElement("span");
-      marker.className = "mqm-quote-marker";
+      const markerDepth = level + 1;
+      marker.className = [
+        "mqm-quote-marker",
+        this.previousDepth >= markerDepth
+          ? "mqm-quote-marker-connect-before"
+          : "",
+        this.nextDepth >= markerDepth
+          ? "mqm-quote-marker-connect-after"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       markers.append(marker);
     }
     return markers;
@@ -415,6 +434,11 @@ function orderedListNumber(
   return count;
 }
 
+function quoteDepth(lineText: string): number {
+  const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(lineText);
+  return (quote?.[2]?.match(/>/g) ?? []).length;
+}
+
 function lineDecorations(
   state: EditorState,
   segment: DocumentSegment,
@@ -521,13 +545,19 @@ function lineDecorations(
       const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
       if (quote) {
         const markers = quote[2] ?? "";
-        const depth = (markers.match(/>/g) ?? []).length;
+        const depth = quoteDepth(line.text);
+        const previousDepth =
+          lineNumber > 1 ? quoteDepth(document.line(lineNumber - 1).text) : 0;
+        const nextDepth =
+          lineNumber < document.lines
+            ? quoteDepth(document.line(lineNumber + 1).text)
+            : 0;
         const from = line.from + (quote[1]?.length ?? 0);
         results.push({
           from,
           to: from + markers.length,
           decoration: Decoration.replace({
-            widget: new QuoteMarkerWidget(depth),
+            widget: new QuoteMarkerWidget(depth, previousDepth, nextDepth),
           }),
         });
         results.push({

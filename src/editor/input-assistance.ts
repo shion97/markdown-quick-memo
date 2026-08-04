@@ -172,6 +172,17 @@ export function createPairInputHandler(): (
     if (view.composing) {
       return false;
     }
+    if (
+      text === "`" &&
+      view.state.doc.sliceString(Math.max(0, from - 2), from) === "``"
+    ) {
+      view.dispatch({
+        changes: { from, to, insert: "`\n\n```" },
+        selection: { anchor: from + 2 },
+        userEvent: "input",
+      });
+      return true;
+    }
     if (text === previouslySkippedClosing) {
       return false;
     }
@@ -190,18 +201,6 @@ export function createPairInputHandler(): (
     const closing = pairs[text];
     if (!closing) {
       return false;
-    }
-
-    if (
-      text === "`" &&
-      view.state.doc.sliceString(Math.max(0, from - 2), from) === "``"
-    ) {
-      view.dispatch({
-        changes: { from, to, insert: "`\n\n```" },
-        selection: { anchor: from + 2 },
-        userEvent: "input",
-      });
-      return true;
     }
 
     const selection = view.state.selection.main;
