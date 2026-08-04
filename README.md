@@ -1,122 +1,167 @@
 # Markdown Quick Memo
 
-Windows向けの、小型でキーボード中心のMarkdownメモアプリです。Markdownの元データを保持したまま編集欄へ装飾を反映し、カーソル行以外のMarkdown記号を可能な範囲で隠します。保存したMarkdownは、任意のタイミングで同じフォルダへPDFとして書き出せます。
+Windows向けの、キーボード中心のMarkdownメモアプリです。Markdown原文を正本として保持しながら、CodeMirror 6の編集欄へ見出し、表、引用、リスト、KaTeX数式などを装飾表示します。
 
-## セットアップと起動
+## 技術構成
+
+- Rust
+- Tauri 2 / WebView2
+- TypeScript
+- CodeMirror 6
+- KaTeX
+
+編集中の本文、選択範囲、Undo・Redo、カーソル、スクロール位置はCodeMirrorの`EditorState`だけが所有します。Rust側へ本文を定期同期せず、保存やPDF出力など必要な操作でだけ本文とリビジョン番号を渡します。
+
+## 開発環境
+
+必要なツールは次のとおりです。
+
+- Node.js 24
+- pnpm 11
+- Rust stable MSVC
+- Visual Studio 2022 Build Tools
+  - Desktop development with C++相当のMSVC・Windows SDK
+- WebView2 Runtime
+
+依存関係を導入します。
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.\.venv\Scripts\python.exe -m markdown_quick_memo
+pnpm install --frozen-lockfile
 ```
 
-コンソールなしで起動する場合は次を使います。
+開発起動には、Visual Studio Developer PowerShellまたはMSVC環境を読み込んだシェルを使用します。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run.ps1
+pnpm tauri dev
 ```
 
-## Windowsショートカット
+## Windowsホットキー
 
-スタートメニューへアプリのショートカットを作成し、現在のユーザーのログオンタスクへ軽量なホットキーランチャーを登録します。`Ctrl + Alt + M` はWindowsのネイティブAPIで検出するため、`.lnk`のホットキー処理で発生する約3秒の待ち時間を回避します。ランチャーはホットキー登録後にエディターを非表示で先読みし、初回表示を待たせません。ログオンタスクを登録できない環境では、レジストリの `Run` へ自動的にフォールバックします。旧版のデスクトップショートカットとスタートアップフォルダーの登録がある場合は削除します。
+`MarkdownQuickMemoHotkey.exe`は、本文を持たない小さなRust製ランチャーです。Windowsの`RegisterHotKey`で`Ctrl + Alt + M`を監視し、Tauri本体を起動します。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
-```
+- ログオン時にランチャーを起動する。
+- ランチャーは本体を`--background`で起動し、WebView2とCodeMirrorを非表示で先読みする。
+- ホットキー押下時は本体EXEを起動する。
+- 本体が起動済みなら、Tauriの単一起動機能が既存プロセスへ表示要求を転送する。
+- 本体が完全終了済みなら、新しい本体プロセスを起動する。
+- `Ctrl + Q`は本体を非表示にし、編集状態を保持する。
+- `Alt + F4`は本体を完全終了するが、ランチャーは残るため再度ホットキーから起動できる。
 
-別のキーにする場合は `-Hotkey "CTRL+ALT+Q"` のように指定します。ランチャーはスクリプト実行直後から動作し、次回以降はWindowsへのサインイン時に自動起動します。
+ランチャーと本体の間でMarkdown本文は同期しません。通信対象は表示要求とホットキー設定だけです。
 
 ## 操作
 
 | 操作 | キー |
 | --- | --- |
+| アプリを表示・再起動 | `Ctrl + Alt + M` |
 | 新規 | `Ctrl + N` |
 | 開く | `Ctrl + O` |
 | 保存 | `Ctrl + S` |
 | 名前を付けて保存 | `Ctrl + Shift + S` |
-| 開いているファイルの名前を変更 | `Ctrl + Shift + R` |
-| 保存先をエクスプローラーで開く | `Ctrl + Shift + E` |
-| PDFに書き出す | `Ctrl + Shift + P` |
+| ファイル名を変更 | `Ctrl + Shift + R` |
+| 保存先を開く | `Ctrl + Shift + E` |
+| PDFへ書き出す | `Ctrl + Shift + P` |
 | 待機状態へ戻す | `Ctrl + Q` |
-| 完全に終了する | `Alt + F4` / ファイルメニューの「閉じる」 |
+| 完全に終了する | `Alt + F4` |
 | 元に戻す / やり直す | `Ctrl + Z` / `Ctrl + Y` |
-| 検索 | `Ctrl + F` |
+| 検索パネルを表示 / 閉じる | `Ctrl + F` |
 | 表を挿入 | `Ctrl + T` |
-| リストを一段深くする / 浅くする | `Tab` / `Shift + Tab` |
-| 構造を継続しない改行 | `Shift + Enter` |
-| ウィンドウの半透明表示を切り替え | `Ctrl + Shift + O` |
 | 太字 / 斜体 / 取り消し線 | `Ctrl + B` / `Ctrl + I` / `Ctrl + Shift + X` |
-| リンク・画像を開く | 対象を `Ctrl + クリック` |
+| リストを深くする / 浅くする | `Tab` / `Shift + Tab` |
+| 構造を継続しない改行 | `Shift + Enter` |
+| 半透明表示 | `Ctrl + Shift + O` |
+| リンク・画像を開く | 対象を`Ctrl + クリック` |
+| 目次を広げる / 狭める | `Ctrl + ←` / `Ctrl + →` |
 
-ローカル画像は画像記法を `Ctrl + クリック` するとプレビューします。相対パスは、保存済みメモではメモの保存フォルダ、未保存メモではアプリの作業フォルダを基準に解決します。
+## 編集と保存
 
-`Ctrl + Shift + R` またはファイルメニューの「ファイル名を変更...」では、保存済みMarkdownのファイル名を同じフォルダ内で変更できます。名前に拡張子を指定しない場合は元の拡張子（通常は `.md`）を補い、既存ファイルは上書きしません。未保存のメモでは、先に保存先を指定する画面を開きます。
+- UTF-8 BOM付きMarkdownを読み込めます。
+- 保存はUTF-8 BOMなしです。
+- 保存先と同じフォルダへ一時ファイルを書き、成功時だけ既存ファイルを置換します。
+- Decoration、数式DOM、表DOMなどの表示要素は保存内容へ含めません。
+- 保存要求には単調増加するリビジョン番号を付けます。保存中に新しい編集が発生した場合、古い保存結果で未保存状態を解除しません。
+- 新規作成やファイルを開く前は、「保存」「保存せず続行」「キャンセル」を区別できます。
 
-`Ctrl + Shift + E` またはファイルメニューの「保存先をエクスプローラーで開く」では、保存済みMarkdownの親フォルダをWindowsの既定のエクスプローラーで開きます。未保存のメモでは、先にMarkdownファイルを保存するよう案内します。
+## Markdown表示
 
-PDF書き出しは「ファイル」メニューまたは `Ctrl + Shift + P` から実行します。未保存または変更中のメモは先にMarkdownとして保存し、`memo.md` と同じフォルダへ `memo.pdf` を生成します。同名PDFがある場合は上書きを確認します。生成後のPDFは、PCで設定されている既定のアプリで自動的に開きます。ローカル画像はMarkdownファイルのフォルダを基準に埋め込み、外部画像URLは取得しません。
-
-半透明表示はウィンドウ全体を60%の不透明度にし、背後の資料を確認しやすくします。アプリを再起動すると不透明表示へ戻ります。
-
-ホットキーランチャーから起動したアプリはバックグラウンドで待機します。`Ctrl + Q` では編集中の内容を保持したまま非表示へ戻り、次回のホットキー操作で即座に復帰します。プロセスまで終了する場合は `Alt + F4` またはファイルメニューの「閉じる」を使用します。
+- 見出し、太字、斜体、取り消し線、インラインコード、コードブロック、引用、リスト、チェックリスト、表、水平線、リンク、画像を装飾します。
+- カーソルまたは選択範囲に重なる箇所はMarkdown原文へ戻し、直接編集できます。
+- 斜体フォントを持たない日本語フォントでも、疑似斜体を使って斜体表示を維持します。
+- 行番号ガターは表示せず、行・列、文字数、単語数を上部へ表示します。
+- `#`から`######`の見出しから階層目次を作成します。長い項目は折り返し、項目が多い場合は目次内を縦スクロールできます。
+- `#`、`##`、`###`の開閉ボタンで配下の見出しをまとめて開閉できます。開閉状態は実行中の目次更新では維持しますが、文書や設定には保存しません。
+- 画面幅1200px以上では目次を右側へ常時表示し、狭い画面では右端へマウスを置くかキーボードフォーカスを移すと表示します。`<`と`>`、または`Ctrl + ←`と`Ctrl + →`で240～480ピクセルの範囲を40ピクセルずつ変更できます。
+- 目次の項目を選ぶと、対応する見出しが編集領域の最上部へ来るようにカーソルと表示位置が移動します。
+- 右上の三点メニューには実装済みのアプリ固有ショートカットをコンパクトに表示します。メニュー外をクリックすると閉じます。
+- 検索パネルは編集欄の右上へ表示します。日本語の検索と置換、大文字・小文字、正規表現、単語単位の条件を使用でき、表示中に`Ctrl + F`を押すと閉じます。
+- インライン数式は`$E=mc^2$`、独立数式は`$$\frac{a}{b}$$`で記述します。
+- KaTeXは`trust: false`で実行し、入力長、展開数、表示サイズに上限を設けます。
+- 不正または上限を超える数式は、UIを停止させず原文へフォールバックします。
+- ローカル画像はMarkdownの保存フォルダ配下かつ20 MB以下だけを読み込みます。
+- 外部画像URLは取得しません。
+- 外部リンクとしてOSへ渡すのは`http`、`https`、`mailto`だけです。
 
 ## 入力支援
 
-入力中のMarkdown構造に応じて、次の入力を自動補完します。補完は編集欄のMarkdown原文へ直接反映され、通常のUndo/Redoで取り消せます。
+- 箇条書き、番号付きリスト、チェックリスト、引用をEnterで継続します。
+- 継続後の空項目で再度Enterを押すと、余分な空行を追加せず構造を終了します。
+- 左右キーは装飾表示内でもMarkdown原文を一文字ずつ移動します。
+- `Tab`と`Shift + Tab`でリスト階層を変更します。通常行では本文を変更せずキーを消費し、目次など別のUIへフォーカスを移しません。
+- コードフェンス内ではMarkdown構造の補完を抑止します。
+- 対括弧、引用符、バッククォートを補完します。
+- バッククォート3個の入力時は閉じフェンスを生成します。
+- 補完結果はMarkdown原文へ通常の編集として入り、Undo・Redoできます。
 
-- リスト行でEnterを押すと、箇条書き・番号付きリスト・チェックリストを次行へ継続します。番号付きリストはMarkdown原文へ`1. `を追加し、プレビューで連番表示します。チェックリストは未チェックの`[ ]`を作成します。画面幅によって一つの項目が折り返される場合、二行目以降は一行目の本文先頭へ揃えます。
-- 空のリスト項目でEnterを押すとリストを終了します。引用内のリストでは、リストだけを終了して引用階層を維持します。
-- 引用行でEnterを押すと同じ引用階層を継続し、空の引用行でEnterを押すと引用を終了します。引用内リストの継続にも対応します。
-- リスト行では`Tab`で一段深く、`Shift + Tab`で一段浅くします。引用内リストも対象です。
-- 行頭のインデントとコードブロック内のインデントは、Enter後の次行へ引き継ぎます。`Shift + Enter`ではリスト・引用・インデントを引き継がず、単純改行を挿入します。
-- バッククォートを3個入力すると、次行へ対応する閉じフェンスを自動挿入します。カーソルは開始フェンスの直後に残るため、言語名を入力してからEnterで本文行へ移動できます。
-- インラインコードは、内容の先頭または末尾に半角・全角スペースがある場合も認識します。
-- `()`、`[]`、`{}`、引用符、バッククォートは対となる記号を補完します。選択範囲を記号で囲むこともでき、既に入力済みの閉じ記号は重複させずにカーソルだけを移動します。
+## PDF
+
+PDF出力時は、Markdownから印刷用HTMLを作成し、編集画面と同じKaTeXとCSSを使用します。WebView2の`PrintToPdf`で一時PDFへ出力し、成功時だけ既存PDFを置換します。PDF用のMarkdown変換コードは操作時に動的読み込みし、通常起動の負荷から分離しています。
 
 ## テスト
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+pnpm test
+pnpm lint
+cargo test --manifest-path .\src-tauri\Cargo.toml --locked --all-targets
+cargo clippy --manifest-path .\src-tauri\Cargo.toml --locked --all-targets -- -D warnings
 ```
 
-## exeの作成
+RustコマンドはMSVC環境を読み込んだシェルで実行してください。
+
+## releaseビルド
+
+Tauri本体、Rustランチャー、NSIS、MSIを作成します。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
-アプリ本体は `dist\MarkdownQuickMemo\MarkdownQuickMemo.exe`、ホットキーランチャーは `dist\MarkdownQuickMemoHotkey\MarkdownQuickMemoHotkey.exe` に作成されます。
+`build.ps1`はTauri版の`build_tauri.ps1`を呼び出す標準入口です。
 
-## 実装上の方針
+主な生成物は次のとおりです。
 
-- 本文は日本語をBIZ UDGothic、英数字をSegoe UIで表示します。PDFではSegoe UIを利用できない場合に同梱Robotoへフォールバックします。コードは等幅フォント、数式プレビューはComputer Modernを使用します。
-- 編集欄内の文字列が保存されるMarkdownそのものです。
-- 記号を隠していても、カーソルがある行では編集できるよう記号を表示します。
-- リストの点・番号と引用の灰色マーカーは、記号を隠す設定でも表示します。
-- マウスホイールは短い補間で滑らかにスクロールし、連続入力や方向反転にも追従します。
-- コードフェンスを隠したときも、指定した言語名をコードブロック上部へ残します。
-- 水平線は編集欄の幅に合わせて描画し、表は縦線と外周線を使わず行間の横線だけで描画します。
-- `Ctrl + T` では行数と列数を指定し、各セルを `q` で埋めたMarkdown表を選択範囲またはカーソル位置へ挿入します。
-- `Ctrl + Shift + P` では、現在のMarkdownを正本として同一フォルダへ同名PDFを書き出します。PDF生成用ライブラリは操作時だけ読み込み、通常起動へ影響させません。
-- リスト、引用、インデント、対記号、インラインコード、コードフェンスの入力支援は、元Markdownの構造を保ったままキー入力時に適用します。
-- 水平線または表へカーソルを移すと、編集できるMarkdown原文へ自動的に戻ります。
-- インライン数式は `$E=mc^2$`、独立した数式は `$$\\frac{a}{b}$$` の形式で入力できます。カーソル行以外ではLaTeX数式をMathText画像として表示し、見出し内では見出しサイズへ連動します。
-- MathTextはウィンドウ表示後にバックグラウンドで先読みし、生成した数式画像をキャッシュして初回変換と再描画の待ち時間を抑えます。
-- 長い文書では装飾範囲の重複判定を区間索引で行い、文字オフセットを一度だけTkの行・列へ変換してタグをまとめて適用します。入力直後の文字数・単語数集計は遅延描画へ統合し、カーソル移動時に全文をPythonへ取得しません。
-- 同じ階層へ `1. ` を連続して入力すると、プレビューでは `1.、2.、3.` の連番として表示します。保存されるMarkdown原文は変更しません。
-- `-`、`*`、`+` の箇条書きは、最上位階層を黒丸 `●`、それより深い階層を白丸 `○` で表示します。
-- 番号付きリストの中に箇条書き、その箇条書きの中に番号付きリストを置くなど、異なる種類のネストに対応します。
-- 完全なWYSIWYG変換はカーソル位置と元データの不整合を招くため、元データを変更しない安全な方式を採用しています。
+- `dist\MarkdownQuickMemo\MarkdownQuickMemo.exe`
+- `dist\MarkdownQuickMemoHotkey\MarkdownQuickMemoHotkey.exe`
+- `src-tauri\target\release\bundle\nsis\Markdown Quick Memo_2.0.0_x64-setup.exe`
+- `src-tauri\target\release\bundle\msi\Markdown Quick Memo_2.0.0_x64_en-US.msi`
 
-## 数式の対応範囲
+## ログオン登録
 
-- MathTextが扱う分数、根号、添字・上付き、ギリシャ文字、関数、極限、総和、積分、集合・論理・関係演算子、矢印、アクセント、フォント指定、短いテキストに対応します。
-- MathTextが直接扱わない `\tfrac` は、プレビュー時だけ同等の `\frac` として描画します。保存されるMarkdownは変更しません。
-- 独立数式では `matrix`、`pmatrix`、`bmatrix`、`Bmatrix`、`vmatrix`、`Vmatrix`、`cases`、`aligned`、`align`、`align*` に対応します。`\\`を行、`&`を列または揃え位置として扱い、`f(x)=\\begin{cases}...`のように環境の前後へ通常数式を置けます。
-- 複合数式は最大20行・20列とし、インライン数式では使用できません。インラインへ入力した場合は数式原文を表示します。
-- 通常文、見出し、リスト、引用、Markdown表のセルで数式を表示します。インラインコード、コードブロック、リンク先URL、画像パスは数式化しません。
-- `\usepackage`、任意の `\newcommand`、数式番号・相互参照、TikZ、化学式パッケージ、LaTeX文書全体には対応しません。未対応または不正な式は原文へフォールバックします。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
+```
 
-## 同梱フォント
+別のキーを初期設定する場合は、例えば次のように指定します。
 
-PDF出力時のフォールバック用RobotoはSIL Open Font License 1.1に基づいて同梱し、アプリのプロセス内だけで登録します。ライセンス全文は `assets/fonts/OFL-Roboto.txt` にあります。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
+```
+
+`create_shortcut.ps1`はTauri版の`create_tauri_shortcut.ps1`を呼び出す標準入口です。
+
+スクリプトは優先度4、多重起動`IgnoreNew`のログオンタスクを登録します。登録できない場合は現在ユーザーの`Run`キーへフォールバックします。アプリ内のホットキー設定では、登録失敗時に元のキーへロールバックします。
+
+登録状態は次で確認できます。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_tauri_install.ps1
+```

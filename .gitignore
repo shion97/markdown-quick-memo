@@ -1,16 +1,10 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-build/
 dist/
-*.spec
-.coverage
-htmlcov/
-tests/fixtures/*.pdf
+dist-web/
+node_modules/
+src-tauri/target/
+src-tauri/gen/
 
-# Local Python environments and secrets
-venv/
-.venv/
+# Local secrets
 .env
 .env.*
 !.env.example
