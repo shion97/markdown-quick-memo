@@ -49,6 +49,28 @@ afterEach(() => {
 });
 
 describe("markdownInputAssistanceの実キーバインド", () => {
+  it("通常行のTabを本文と選択範囲を変えずに消費する", () => {
+    const view = createView("本文", 1);
+
+    expect(press(view, "Tab")).toBe(true);
+    expect(view.state.doc.toString()).toBe("本文");
+    expect(view.state.selection.main.head).toBe(1);
+
+    expect(press(view, "Tab", true)).toBe(true);
+    expect(view.state.doc.toString()).toBe("本文");
+    expect(view.state.selection.main.head).toBe(1);
+  });
+
+  it("リスト行のTabとShift+Tabで既存の階層変更を維持する", () => {
+    const view = createView("- 項目");
+
+    expect(press(view, "Tab")).toBe(true);
+    expect(view.state.doc.toString()).toBe("  - 項目");
+
+    expect(press(view, "Tab", true)).toBe(true);
+    expect(view.state.doc.toString()).toBe("- 項目");
+  });
+
   it("Enterでリストを一度継続し、空項目の次のEnterで終了する", () => {
     const view = createView("- item");
 

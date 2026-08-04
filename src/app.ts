@@ -14,13 +14,18 @@ import {
   replaceDocument,
 } from "./editor/editor";
 import {
+  buildOutlineTree,
   extractOutline,
   navigateToHeading,
   type OutlineHeading,
+  type OutlineNode,
 } from "./editor/outline";
 import { RevisionTracker } from "./editor/revision";
 
 const DEFAULT_TITLE = "Markdown Quick Memo";
+const OUTLINE_MIN_WIDTH = 240;
+const OUTLINE_MAX_WIDTH = 480;
+const OUTLINE_WIDTH_STEP = 40;
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -66,6 +71,8 @@ export class MarkdownQuickMemoApplication {
   private suppressChanges = false;
   private saving = false;
   private translucent = false;
+  private outlineWidth = OUTLINE_MIN_WIDTH;
+  private readonly collapsedOutlineKeys = new Set<string>();
 
   constructor(private readonly root: HTMLElement) {
     this.root.innerHTML = this.layout();
@@ -102,6 +109,7 @@ export class MarkdownQuickMemoApplication {
       },
     });
     this.bindActions();
+    this.updateOutlineWidth(0);
   }
 
   async initialize(): Promise<void> {
@@ -146,23 +154,47 @@ export class MarkdownQuickMemoApplication {
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
           </div>
           <div id="more-menu" class="popover" hidden>
-            <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
-            <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
-            <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
-            <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
-            <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+Shift+R</kbd></button>
-            <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+Shift+E</kbd></button>
-            <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+Shift+P</kbd></button>
-            <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
-            <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
-            <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
+            <section class="popover-group" aria-labelledby="shortcut-file-heading">
+              <h2 id="shortcut-file-heading">ファイル</h2>
+              <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
+              <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
+              <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
+              <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
+              <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+Shift+R</kbd></button>
+              <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+Shift+E</kbd></button>
+              <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+Shift+P</kbd></button>
+            </section>
+            <section class="popover-group" aria-labelledby="shortcut-edit-heading">
+              <h2 id="shortcut-edit-heading">編集</h2>
+              <div class="shortcut-row"><span>元に戻す / やり直す</span><kbd>Ctrl+Z / Ctrl+Y</kbd></div>
+              <div class="shortcut-row"><span>検索</span><kbd>Ctrl+F</kbd></div>
+              <div class="shortcut-row"><span>表を挿入</span><kbd>Ctrl+T</kbd></div>
+              <div class="shortcut-row"><span>太字 / 斜体</span><kbd>Ctrl+B / Ctrl+I</kbd></div>
+              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+Shift+X</kbd></div>
+              <div class="shortcut-row"><span>リストを深く / 浅く</span><kbd>Tab / Shift+Tab</kbd></div>
+              <div class="shortcut-row"><span>単純改行</span><kbd>Shift+Enter</kbd></div>
+              <div class="shortcut-row"><span>リンク・画像を開く</span><kbd>Ctrl+クリック</kbd></div>
+            </section>
+            <section class="popover-group" aria-labelledby="shortcut-window-heading">
+              <h2 id="shortcut-window-heading">表示・終了</h2>
+              <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
+              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
+              <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
+              <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
+            </section>
             <button data-action="settings" class="popover-settings"><span>ホットキー設定</span></button>
           </div>
         </header>
         <section id="workspace" class="workspace">
           <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
           <aside id="outline" class="outline-panel" aria-label="目次" hidden>
-            <h2>目次</h2>
+            <header class="outline-header">
+              <h2>目次</h2>
+              <div class="outline-width-actions">
+                <button type="button" data-action="outline-expand" aria-label="目次を広げる">&lt;</button>
+                <button type="button" data-action="outline-shrink" aria-label="目次を狭める">&gt;</button>
+              </div>
+            </header>
             <nav id="outline-list" class="outline-list" aria-label="文書の見出し"></nav>
           </aside>
         </section>
@@ -192,6 +224,13 @@ export class MarkdownQuickMemoApplication {
 
   private bindActions(): void {
     this.root.addEventListener("click", (event) => {
+      const outlineToggle = (
+        event.target as HTMLElement
+      ).closest<HTMLButtonElement>("button[data-outline-toggle-key]");
+      if (outlineToggle) {
+        this.toggleOutlineBranch(outlineToggle);
+        return;
+      }
       const heading = (event.target as HTMLElement).closest<HTMLButtonElement>(
         "button[data-heading-position]",
       );
@@ -212,6 +251,24 @@ export class MarkdownQuickMemoApplication {
     });
     document.addEventListener("keydown", (event) => {
       void this.handleShortcut(event);
+    });
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      const menu = this.required("#more-menu");
+      const trigger = this.required<HTMLButtonElement>(
+        "button[data-action='more']",
+      );
+      if (
+        menu.hidden ||
+        menu.contains(target) ||
+        trigger.contains(target)
+      ) {
+        return;
+      }
+      this.hideMoreMenu();
     });
   }
 
@@ -234,6 +291,8 @@ export class MarkdownQuickMemoApplication {
       hide: () => backend.hideWindow(),
       exit: () => this.exitWithConfirmation(),
       more: () => this.toggleMoreMenu(),
+      "outline-expand": () => this.updateOutlineWidth(OUTLINE_WIDTH_STEP),
+      "outline-shrink": () => this.updateOutlineWidth(-OUTLINE_WIDTH_STEP),
       "close-image": () => this.imageDialog.close(),
     };
     await actions[action]?.();
@@ -512,24 +571,115 @@ export class MarkdownQuickMemoApplication {
   }
 
   private renderOutline(headings: OutlineHeading[]): void {
-    this.outlineList.replaceChildren(
-      ...headings.map((heading) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "outline-item";
-        button.textContent = heading.label;
-        button.dataset.headingPosition = String(heading.position);
-        button.style.setProperty(
-          "--outline-indent",
-          `${(heading.level - 1) * 12}px`,
-        );
-        button.title = heading.label;
-        return button;
-      }),
-    );
+    const tree = buildOutlineTree(headings);
+    const validKeys = new Set<string>();
+    const collectKeys = (nodes: readonly OutlineNode[]): void => {
+      for (const node of nodes) {
+        validKeys.add(node.key);
+        collectKeys(node.children);
+      }
+    };
+    collectKeys(tree);
+    for (const key of this.collapsedOutlineKeys) {
+      if (!validKeys.has(key)) {
+        this.collapsedOutlineKeys.delete(key);
+      }
+    }
+    this.outlineList.replaceChildren(...this.renderOutlineNodes(tree));
     const hasOutline = headings.length > 0;
     this.outline.hidden = !hasOutline;
     this.workspace.classList.toggle("has-outline", hasOutline);
+  }
+
+  private renderOutlineNodes(nodes: readonly OutlineNode[]): HTMLElement[] {
+    return nodes.map((node) => {
+      const container = document.createElement("div");
+      container.className = "outline-node";
+
+      const row = document.createElement("div");
+      row.className = "outline-row";
+
+      const canCollapse = node.level <= 3 && node.children.length > 0;
+      if (canCollapse) {
+        const toggle = document.createElement("button");
+        const collapsed = this.collapsedOutlineKeys.has(node.key);
+        toggle.type = "button";
+        toggle.className = "outline-toggle";
+        toggle.dataset.outlineToggleKey = node.key;
+        toggle.dataset.outlineLabel = node.label;
+        toggle.setAttribute("aria-expanded", String(!collapsed));
+        toggle.setAttribute(
+          "aria-label",
+          `${node.label}の配下を${collapsed ? "開く" : "閉じる"}`,
+        );
+        toggle.textContent = collapsed ? ">" : "⌄";
+        row.append(toggle);
+      } else {
+        const spacer = document.createElement("span");
+        spacer.className = "outline-toggle-spacer";
+        spacer.setAttribute("aria-hidden", "true");
+        row.append(spacer);
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "outline-item";
+      button.textContent = node.label;
+      button.dataset.headingPosition = String(node.position);
+      button.title = node.label;
+      row.append(button);
+      container.append(row);
+
+      if (node.children.length > 0) {
+        const children = document.createElement("div");
+        children.className = "outline-children";
+        children.hidden = this.collapsedOutlineKeys.has(node.key);
+        children.append(...this.renderOutlineNodes(node.children));
+        container.append(children);
+      }
+      return container;
+    });
+  }
+
+  private toggleOutlineBranch(toggle: HTMLButtonElement): void {
+    const key = toggle.dataset.outlineToggleKey;
+    const children = toggle
+      .closest<HTMLElement>(".outline-node")
+      ?.querySelector<HTMLElement>(":scope > .outline-children");
+    if (!key || !children) {
+      return;
+    }
+    const collapsed = !children.hidden;
+    children.hidden = collapsed;
+    toggle.textContent = collapsed ? ">" : "⌄";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    const label = toggle.dataset.outlineLabel ?? "目次項目";
+    toggle.setAttribute(
+      "aria-label",
+      `${label}の配下を${collapsed ? "開く" : "閉じる"}`,
+    );
+    if (collapsed) {
+      this.collapsedOutlineKeys.add(key);
+    } else {
+      this.collapsedOutlineKeys.delete(key);
+    }
+  }
+
+  private updateOutlineWidth(delta: number): void {
+    this.outlineWidth = Math.min(
+      OUTLINE_MAX_WIDTH,
+      Math.max(OUTLINE_MIN_WIDTH, this.outlineWidth + delta),
+    );
+    this.workspace.style.setProperty(
+      "--outline-width",
+      `${this.outlineWidth}px`,
+    );
+    this.required<HTMLButtonElement>(
+      "button[data-action='outline-expand']",
+    ).disabled = this.outlineWidth >= OUTLINE_MAX_WIDTH;
+    this.required<HTMLButtonElement>(
+      "button[data-action='outline-shrink']",
+    ).disabled = this.outlineWidth <= OUTLINE_MIN_WIDTH;
   }
 
   private async handleControlClick(position: number): Promise<void> {
@@ -660,6 +810,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private renderHotkeyStatus(status: HotkeyStatus): void {
+    this.required("#app-hotkey-shortcut").textContent = status.shortcut;
     const registration = status.registered ? "登録済み" : "未登録";
     const lastTriggered = status.lastTriggeredAtMs
       ? new Date(status.lastTriggeredAtMs).toLocaleString()

@@ -10,6 +10,7 @@ import {
   highlightActiveLine,
   highlightSpecialChars,
   keymap,
+  scrollPastEnd,
 } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
@@ -95,6 +96,7 @@ export function createEditor(
     markdownDecorations,
     editorTheme(),
     EditorView.lineWrapping,
+    scrollPastEnd(),
     EditorView.updateListener.of((update) => {
       if (update.docChanged || update.selectionSet) {
         const head = update.state.selection.main.head;

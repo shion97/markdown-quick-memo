@@ -5,7 +5,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { afterEach, describe, expect, it } from "vitest";
-import { extractOutline, navigateToHeading } from "./outline";
+import { buildOutlineTree, extractOutline, navigateToHeading } from "./outline";
 
 const views: EditorView[] = [];
 
@@ -65,6 +65,35 @@ describe("extractOutline", () => {
       { level: 1, label: "同名", position: 0 },
       { level: 1, label: "同名", position: source.lastIndexOf("#") },
     ]);
+  });
+});
+
+describe("buildOutlineTree", () => {
+  it("見出しレベルが飛んでも直前の浅い見出しへ接続する", () => {
+    const headings = extractOutline(
+      createState("# 親\n### 子\n#### 孫\n## 兄弟\n# 次の親"),
+    );
+
+    const tree = buildOutlineTree(headings);
+
+    expect(tree).toHaveLength(2);
+    expect(tree[0]?.label).toBe("親");
+    expect(tree[0]?.children.map((node) => node.label)).toEqual(["子", "兄弟"]);
+    expect(tree[0]?.children[0]?.children[0]?.label).toBe("孫");
+    expect(tree[1]?.label).toBe("次の親");
+  });
+
+  it("同名見出しへ位置に依存しない異なるキーを割り当てる", () => {
+    const first = buildOutlineTree(
+      extractOutline(createState("# 親\n## 同名\n## 同名")),
+    );
+    const shifted = buildOutlineTree(
+      extractOutline(createState("本文\n# 親\n## 同名\n## 同名")),
+    );
+
+    expect(first[0]?.key).toBe(shifted[0]?.key);
+    expect(first[0]?.children[0]?.key).toBe(shifted[0]?.children[0]?.key);
+    expect(first[0]?.children[0]?.key).not.toBe(first[0]?.children[1]?.key);
   });
 });
 

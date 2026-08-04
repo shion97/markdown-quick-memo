@@ -142,6 +142,11 @@ function indentList(view: EditorView, remove: boolean): boolean {
   return true;
 }
 
+function handleTab(view: EditorView, remove: boolean): boolean {
+  indentList(view, remove);
+  return true;
+}
+
 function pairInputHandler(
   view: EditorView,
   from: number,
@@ -211,8 +216,8 @@ export function markdownInputAssistance(): Extension {
       keymap.of([
         { key: "Enter", run: insertContinuation },
         { key: "Shift-Enter", run: insertPlainLineBreak },
-        { key: "Tab", run: (view) => indentList(view, false) },
-        { key: "Shift-Tab", run: (view) => indentList(view, true) },
+        { key: "Tab", run: (view) => handleTab(view, false) },
+        { key: "Shift-Tab", run: (view) => handleTab(view, true) },
         { key: "ArrowLeft", run: cursorCharBackwardLogical },
         { key: "ArrowRight", run: cursorCharForwardLogical },
         { key: "ArrowUp", run: cursorLineUp },

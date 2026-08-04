@@ -142,8 +142,10 @@ button.primary:hover {
   top: 48px;
   right: 14px;
   display: grid;
-  width: 200px;
+  width: min(320px, calc(100vw - 28px));
+  max-height: calc(100vh - 60px);
   padding: 4px;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -154,8 +156,10 @@ button.primary:hover {
   display: none;
 }
 
-.popover button {
+.popover button,
+.shortcut-row {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 8px;
   padding: 5px 7px;
@@ -163,6 +167,24 @@ button.primary:hover {
   border-radius: 5px;
   font-size: 12px;
   text-align: left;
+}
+
+.popover-group + .popover-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.popover-group h2 {
+  margin: 2px 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.shortcut-row span,
+.popover button span {
+  min-width: 0;
 }
 
 .popover kbd {
@@ -200,13 +222,13 @@ button.primary:hover {
   bottom: 0;
   display: flex;
   flex-direction: column;
-  width: 240px;
+  width: min(var(--outline-width, 240px), calc(100% - 14px));
   min-height: 0;
   padding: 12px 10px;
   border-left: 3px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--surface) 97%, transparent);
   box-shadow: var(--shadow);
-  transform: translateX(226px);
+  transform: translateX(calc(100% - 14px));
   transition: transform 140ms ease-out;
 }
 
@@ -219,30 +241,99 @@ button.primary:hover {
   transform: translateX(0);
 }
 
-.outline-panel h2 {
+.outline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 4px 8px;
+}
+
+.outline-panel h2 {
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 
+.outline-width-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.outline-width-actions button,
+.outline-toggle {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.outline-width-actions button {
+  width: 22px;
+  height: 22px;
+}
+
+.outline-width-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .outline-list {
   display: grid;
+  align-content: start;
+  flex: 1 1 auto;
   gap: 2px;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.outline-node,
+.outline-children {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.outline-children {
+  margin-left: 9px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.outline-children[hidden] {
+  display: none;
+}
+
+.outline-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+}
+
+.outline-toggle,
+.outline-toggle-spacer {
+  width: 18px;
+  height: 24px;
+  font-size: 12px;
 }
 
 .outline-item {
   width: 100%;
-  padding: 5px 7px 5px calc(7px + var(--outline-indent));
-  overflow: hidden;
+  padding: 5px 7px;
   border: 0;
   border-radius: 5px;
   font-size: 12px;
+  line-height: 1.45;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .mqm-math-inline {
@@ -619,7 +710,7 @@ dialog::backdrop {
 
 @media (min-width: 1200px) {
   .workspace.has-outline {
-    grid-template-columns: minmax(0, 1fr) 240px;
+    grid-template-columns: minmax(0, 1fr) var(--outline-width, 240px);
   }
 
   .outline-panel {
