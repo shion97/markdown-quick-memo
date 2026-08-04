@@ -6,7 +6,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 use tempfile::Builder;
-use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_7;
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_7, ICoreWebView2Environment6};
 use webview2_com::PrintToPdfCompletedHandler;
 use windows::core::{Interface, PCWSTR};
 
@@ -79,6 +79,11 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
             let result = (|| -> windows::core::Result<()> {
                 let core = unsafe { webview.controller().CoreWebView2()? };
                 let printable: ICoreWebView2_7 = core.cast()?;
+                let environment: ICoreWebView2Environment6 = webview.environment().cast()?;
+                let print_settings = unsafe { environment.CreatePrintSettings()? };
+                unsafe {
+                    print_settings.SetShouldPrintBackgrounds(true)?;
+                }
                 let path_wide: Vec<u16> = temporary_path
                     .as_os_str()
                     .encode_wide()
@@ -122,7 +127,11 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
                     },
                 ));
                 unsafe {
-                    printable.PrintToPdf(PCWSTR(path_wide.as_ptr()), None, &callback)?;
+                    printable.PrintToPdf(
+                        PCWSTR(path_wide.as_ptr()),
+                        Some(&print_settings),
+                        &callback,
+                    )?;
                 }
                 Ok(())
             })();

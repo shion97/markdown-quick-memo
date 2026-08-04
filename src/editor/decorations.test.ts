@@ -121,6 +121,45 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(6);
   });
 
+  it("編集中の引用でも縦線とMarkdown原文を同時表示する", () => {
+    const source = "> 編集中\n\n通常行";
+    const parent = renderDocument(source, 2);
+    const activeQuote = parent.querySelector<HTMLElement>(
+      ".mqm-quote-line-active",
+    );
+
+    expect(activeQuote?.querySelector(".mqm-quote-markers")).not.toBeNull();
+    expect(activeQuote?.textContent).toContain("> 編集中");
+  });
+
+  it("長い半角・全角引用へ折り返し用の行装飾を適用する", () => {
+    const source = [
+      `> ${"a".repeat(160)}`,
+      `> ${"あ".repeat(160)}`,
+      "",
+      "カーソル位置",
+    ].join("\n");
+    const parent = renderDocument(source);
+    const quoteLines = Array.from(
+      parent.querySelectorAll<HTMLElement>(".mqm-quote-line"),
+    );
+
+    expect(quoteLines).toHaveLength(2);
+    for (const line of quoteLines) {
+      expect(line.getAttribute("style")).toContain(
+        "--mqm-quote-marker-width: 1em",
+      );
+    }
+  });
+
+  it("標準チェックリストは別行へ移動するとチェック枠へ変換する", () => {
+    const source = "- [ ] 本文\n\nカーソル位置";
+    const parent = renderDocument(source, source.length);
+
+    expect(parent.querySelectorAll(".mqm-checkbox")).toHaveLength(1);
+    expect(parent.textContent).not.toContain("[ ] 本文");
+  });
+
   it("連続する引用行だけを階層ごとに接続する", () => {
     const parent = renderDocument(
       "> 一階層\n> > 二階層\n> 一階層\n\n> 別の引用\n\nカーソル位置",

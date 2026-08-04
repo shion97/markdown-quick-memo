@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { type EditorState, StateField, type Text } from "@codemirror/state";
 import {
   Decoration,
@@ -542,32 +542,6 @@ function lineDecorations(
         }
       }
 
-      const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
-      if (quote) {
-        const markers = quote[2] ?? "";
-        const depth = quoteDepth(line.text);
-        const previousDepth =
-          lineNumber > 1 ? quoteDepth(document.line(lineNumber - 1).text) : 0;
-        const nextDepth =
-          lineNumber < document.lines
-            ? quoteDepth(document.line(lineNumber + 1).text)
-            : 0;
-        const from = line.from + (quote[1]?.length ?? 0);
-        results.push({
-          from,
-          to: from + markers.length,
-          decoration: Decoration.replace({
-            widget: new QuoteMarkerWidget(depth, previousDepth, nextDepth),
-          }),
-        });
-        results.push({
-          from: line.from,
-          to: line.from,
-          decoration: Decoration.line({
-            attributes: { class: "mqm-quote-line" },
-          }),
-        });
-      }
     }
     if (lineIsActive) {
       const activeList =
@@ -588,15 +562,44 @@ function lineDecorations(
           }),
         });
       }
-      if (/^([ \t]*)((?:>[ \t]?)+)/.test(line.text)) {
-        results.push({
-          from: line.from,
-          to: line.from,
-          decoration: Decoration.line({
-            attributes: { class: "mqm-quote-line" },
-          }),
-        });
-      }
+    }
+    const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
+    if (quote) {
+      const markers = quote[2] ?? "";
+      const depth = quoteDepth(line.text);
+      const previousDepth =
+        lineNumber > 1 ? quoteDepth(document.line(lineNumber - 1).text) : 0;
+      const nextDepth =
+        lineNumber < document.lines
+          ? quoteDepth(document.line(lineNumber + 1).text)
+          : 0;
+      const from = line.from + (quote[1]?.length ?? 0);
+      const marker = new QuoteMarkerWidget(depth, previousDepth, nextDepth);
+      results.push({
+        from,
+        to: lineIsActive ? from : from + markers.length,
+        decoration: lineIsActive
+          ? Decoration.widget({ widget: marker, side: -1 })
+          : Decoration.replace({ widget: marker }),
+      });
+      const sourceWidth = lineIsActive
+        ? markers.replace(/\t/g, "  ").length
+        : 0;
+      results.push({
+        from: line.from,
+        to: line.from,
+        decoration: Decoration.line({
+          attributes: {
+            class: lineIsActive
+              ? "mqm-quote-line mqm-quote-line-active"
+              : "mqm-quote-line",
+            style: [
+              `--mqm-quote-marker-width: ${depth}em`,
+              `--mqm-quote-source-width: ${sourceWidth}ch`,
+            ].join("; "),
+          },
+        }),
+      });
     }
     lineNumber += 1;
   }
@@ -789,6 +792,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
 
 export const markdownDecorations = StateField.define<DecorationSet>({
   create(state) {
+    ensureSyntaxTree(state, state.doc.length, 100);
     return buildDecorations(state);
   },
   update(decorations, transaction) {

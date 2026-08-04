@@ -18,9 +18,19 @@ interface Continuation {
   inserted: string;
 }
 
+interface TextChange {
+  replacementFrom: number;
+  replacementTo: number;
+  inserted: string;
+}
+
 const LIST_PATTERN =
   /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/;
 const QUOTE_PATTERN = /^((?:[ \t]*>[ \t]?)+)(.*)$/;
+
+function reducedQuotePrefix(prefix: string): string {
+  return prefix.slice(0, prefix.lastIndexOf(">"));
+}
 
 export function continuationForLine(
   lineText: string,
@@ -57,7 +67,7 @@ export function continuationForLine(
       return {
         replacementFrom: 0,
         replacementTo: beforeCursor.length,
-        inserted: "\n",
+        inserted: reducedQuotePrefix(prefix),
       };
     }
     return { inserted: `\n${prefix}` };
@@ -65,6 +75,28 @@ export function continuationForLine(
 
   const indentation = /^\s*/.exec(beforeCursor)?.[0] ?? "";
   return { inserted: `\n${indentation}` };
+}
+
+export function quoteSpaceDeletionForLine(
+  lineText: string,
+  cursorOffset: number,
+): TextChange | null {
+  const beforeCursor = lineText.slice(0, cursorOffset);
+  const afterCursor = lineText.slice(cursorOffset);
+  const quote = QUOTE_PATTERN.exec(beforeCursor);
+  if (
+    !quote ||
+    (quote[2] ?? "") !== "" ||
+    !beforeCursor.endsWith(" ") ||
+    afterCursor.trim() !== ""
+  ) {
+    return null;
+  }
+  return {
+    replacementFrom: cursorOffset - 1,
+    replacementTo: cursorOffset,
+    inserted: "",
+  };
 }
 
 function inCodeBlock(view: EditorView, position: number): boolean {
@@ -107,6 +139,30 @@ function insertPlainLineBreak(view: EditorView): boolean {
     },
     selection: { anchor: selection.from + 1 },
     userEvent: "input",
+  });
+  return true;
+}
+
+function deleteQuoteSpace(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty || inCodeBlock(view, selection.head)) {
+    return false;
+  }
+  const line = view.state.doc.lineAt(selection.head);
+  const cursorOffset = selection.head - line.from;
+  const deletion = quoteSpaceDeletionForLine(line.text, cursorOffset);
+  if (!deletion) {
+    return false;
+  }
+  const from = line.from + deletion.replacementFrom;
+  view.dispatch({
+    changes: {
+      from,
+      to: line.from + deletion.replacementTo,
+      insert: deletion.inserted,
+    },
+    selection: { anchor: from },
+    userEvent: "delete.backward",
   });
   return true;
 }
@@ -236,6 +292,7 @@ export function markdownInputAssistance(): Extension {
     Prec.highest(
       keymap.of([
         { key: "Enter", run: insertContinuation },
+        { key: "Backspace", run: deleteQuoteSpace },
         { key: "Shift-Enter", run: insertPlainLineBreak },
         { key: "Tab", run: (view) => handleTab(view, false) },
         { key: "Shift-Tab", run: (view) => handleTab(view, true) },

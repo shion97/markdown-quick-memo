@@ -69,8 +69,20 @@ describe("preparePrintDocument", () => {
       "inline",
     );
     expect(target.querySelector("pre.mqm-print-code-block")).not.toBeNull();
+    expect(target.querySelector(".mqm-print-code-language")?.textContent).toBe(
+      "ts",
+    );
     expect(target.querySelector("hr.mqm-horizontal-rule")).not.toBeNull();
-    expect(target.querySelector("table.mqm-table")).not.toBeNull();
+    expect(target.querySelector("table.mqm-table th")?.textContent).toBe(
+      "項目",
+    );
+  });
+
+  it("言語指定のないコードブロックには言語ラベルを追加しない", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument("```\n本文\n```", target, vi.fn());
+
+    expect(target.querySelector(".mqm-print-code-language")).toBeNull();
   });
 
   it("表示できないブロック数式をコードブロックとは別の代替表示にする", async () => {

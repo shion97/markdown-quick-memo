@@ -148,6 +148,18 @@ function decoratePrintMarkup(target: HTMLElement): void {
     "pre:not(.print-math-fallback)",
   )) {
     codeBlock.classList.add("mqm-print-code-block");
+    const code = codeBlock.querySelector<HTMLElement>("code");
+    const languageClass = Array.from(code?.classList ?? []).find((className) =>
+      className.startsWith("language-"),
+    );
+    const language = languageClass?.slice("language-".length);
+    if (language) {
+      const label = document.createElement("span");
+      label.className = "mqm-code-language mqm-print-code-language";
+      label.textContent = language;
+      label.setAttribute("aria-label", `コード言語: ${language}`);
+      codeBlock.prepend(label);
+    }
   }
   for (const quote of target.querySelectorAll<HTMLElement>("blockquote")) {
     quote.classList.add("mqm-print-quote");
