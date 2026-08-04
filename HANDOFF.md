@@ -99,3 +99,13 @@ branch : `feat/tauri-migration`
 斜体Decorationへ`font-synthesis: style`を指定し、斜体字形を持たない日本語フォントでも疑似斜体を使用するよう修正。上部UIへ文書情報とコンパクトな主操作一覧を配置し、下部ステータスバーを廃止。CodeMirror構文木からATX見出しの深さ・表示名・位置を抽出し、目次選択時にカーソル、スクロール、フォーカスを該当位置へ移す処理を追加した。1200ピクセル以上は240ピクセル幅の常設目次、未満は右端14ピクセルを残すオーバーレイとした。標準ビルド・登録スクリプトをTauri版の入口へ統一し、READMEと設計資料を同期した。
 ### 検証結果
 TypeScriptテスト31件、`pnpm lint`、`pnpm build`、Rust本体10件・ランチャー2件が成功。ローカルブラウザで日本語・英字の斜体、1280・960・560ピクセルのレスポンシブ表示、コンパクトメニューを確認した。標準`build.ps1`から本体・Rustランチャー・NSIS・MSIを再作成し、標準`create_shortcut.ps1`でログオンタスクを再登録した。優先度4、`IgnoreNew`、引数なし、設定`CTRL+ALT+M`、旧Run値削除、本体1プロセス・ランチャー1プロセスを非UIで確認した。
+
+## 2026-08-04 `旧Python実装を削除`
+comit : `旧Python実装を削除`
+branch : `feat/tauri-migration`
+### 要件
+Rust＋Tauri版の実装・ビルド・検証に必要な資材を保持し、旧Python・Tkinter・PyInstaller版のソース、テスト、依存定義、起動資材、ローカル生成物を削除する。現行設計資料、移行記録、引継ぎ履歴、RustとTypeScriptが参照するMarkdown fixtureは保持する。
+### 対応
+旧Pythonパッケージ、Pythonテスト、依存定義、起動スクリプト、専用フォント・アイコンを削除した。Python専用の無視設定とREADMEの旧テスト手順を除去し、Tauriの配布先を再作成前に消去することでPyInstaller資材が残留しないよう`build_tauri.ps1`を変更した。ローカルの`.venv`、Pythonキャッシュ、PyInstaller生成物を削除し、Tauri版の配布物だけを再生成した。
+### 検証結果
+TypeScriptテスト31件、`pnpm lint`、`pnpm build`、Rust本体10件・ランチャー2件、`cargo clippy --all-targets -- -D warnings`が成功した。標準`build.ps1`で本体・Rustランチャー・NSIS・MSIを再作成し、`create_shortcut.ps1`でログオンタスクを再登録した。優先度4、`IgnoreNew`、引数なし、設定`CTRL+ALT+M`、旧Run値削除、本体1プロセス・ランチャー1プロセスを非UIで確認した。`dist`には2つのRust製EXEだけが存在し、Python DLL、`.pyd`、Tk、PyInstallerの`_internal`がないことを確認した。

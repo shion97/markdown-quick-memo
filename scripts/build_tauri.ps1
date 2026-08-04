@@ -83,6 +83,12 @@ if (-not (Test-Path -LiteralPath $ReleaseLauncher)) {
     throw "Rust hotkey launcher was not created: $ReleaseLauncher"
 }
 
+foreach ($Directory in @($DistributionDirectory, $LauncherDistributionDirectory)) {
+    if (Test-Path -LiteralPath $Directory) {
+        Remove-Item -LiteralPath $Directory -Recurse -Force
+    }
+}
+
 New-Item -ItemType Directory -Path $DistributionDirectory -Force | Out-Null
 Copy-Item -LiteralPath $ReleaseExecutable -Destination $DistributionExecutable -Force
 New-Item -ItemType Directory -Path $LauncherDistributionDirectory -Force | Out-Null

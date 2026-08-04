@@ -5,7 +5,6 @@ import typescript from "@typescript-eslint/eslint-plugin";
 export default [
   {
     ignores: [
-      ".venv/**",
       "build/**",
       "dist/**",
       "dist-web/**",

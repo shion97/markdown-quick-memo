@@ -123,12 +123,6 @@ cargo clippy --manifest-path .\src-tauri\Cargo.toml --locked --all-targets -- -D
 
 RustコマンドはMSVC環境を読み込んだシェルで実行してください。
 
-旧Python/Tkinter版の回帰基準を確認する場合は次を使用します。
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
 ## releaseビルド
 
 Tauri本体、Rustランチャー、NSIS、MSIを作成します。
