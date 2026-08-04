@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -8,6 +10,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { markdownDecorations } from "./decorations";
 
 const views: EditorView[] = [];
+
+function loadApplicationStyles(): void {
+  if (!document.head.querySelector("#application-styles")) {
+    const style = document.createElement("style");
+    style.id = "application-styles";
+    style.textContent = readFileSync(
+      resolve(process.cwd(), "src/styles.css"),
+      "utf8",
+    );
+    document.head.append(style);
+  }
+}
 
 function renderDocument(source: string, cursor = source.length): HTMLElement {
   const parent = document.createElement("div");
@@ -34,6 +48,7 @@ afterEach(() => {
     view.destroy();
   }
   document.body.replaceChildren();
+  document.head.querySelector("#application-styles")?.remove();
 });
 
 describe("markdownDecorations", () => {
@@ -107,10 +122,15 @@ describe("markdownDecorations", () => {
   });
 
   it("カーソルが斜体内にあっても内容の斜体表示を維持する", () => {
-    const parent = renderDocument("*A*", 1);
-
-    expect(parent.querySelector(".mqm-emphasis-content")?.textContent).toBe(
-      "A",
+    loadApplicationStyles();
+    const parent = renderDocument("*A* と *日本語*", 1);
+    const emphasis = parent.querySelector<HTMLElement>(
+      ".mqm-emphasis-content",
     );
+
+    expect(emphasis?.textContent).toBe("A");
+    expect(window.getComputedStyle(emphasis!).fontStyle).toBe("italic");
+    expect(window.getComputedStyle(emphasis!).fontSynthesis).toBe("style");
+    expect(parent.querySelectorAll(".mqm-emphasis-content")).toHaveLength(2);
   });
 });

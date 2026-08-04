@@ -89,3 +89,13 @@ branch : `fix/shortcut-selection-inline-code`
 「閉じる」の前に「非表示」を追加し、アクセラレータを `Ctrl+Q`、実行処理を既存の `hide_window` に設定。GUIテストへメニュー項目とアクセラレータの検証を追加。
 ### 検証結果
 `tests.test_gui_smoke.GuiSmokeTests.test_view_menu_is_removed_and_table_shortcut_is_bound` が成功し、`git diff --check`も問題なし。
+
+## 2026-08-04 `斜体表示と目次UIを改善`
+comit : `斜体表示と目次UIを改善`
+branch : `feat/tauri-migration`
+### 要件
+日本語を含む斜体表示を確実に反映する。上部の新規・開く・保存ボタンと下部の「Markdown原文を保存」を削除し、行・列、文字数、単語数を上部へ移動する。三点メニューを小さいショートカット一覧とし、ATX見出しから右側目次を生成する。広い画面では目次を常時表示し、狭い画面では右端から展開できるようにする。
+### 対応
+斜体Decorationへ`font-synthesis: style`を指定し、斜体字形を持たない日本語フォントでも疑似斜体を使用するよう修正。上部UIへ文書情報とコンパクトな主操作一覧を配置し、下部ステータスバーを廃止。CodeMirror構文木からATX見出しの深さ・表示名・位置を抽出し、目次選択時にカーソル、スクロール、フォーカスを該当位置へ移す処理を追加した。1200ピクセル以上は240ピクセル幅の常設目次、未満は右端14ピクセルを残すオーバーレイとした。標準ビルド・登録スクリプトをTauri版の入口へ統一し、READMEと設計資料を同期した。
+### 検証結果
+TypeScriptテスト31件、`pnpm lint`、`pnpm build`、Rust本体10件・ランチャー2件が成功。ローカルブラウザで日本語・英字の斜体、1280・960・560ピクセルのレスポンシブ表示、コンパクトメニューを確認した。標準`build.ps1`から本体・Rustランチャー・NSIS・MSIを再作成し、標準`create_shortcut.ps1`でログオンタスクを再登録した。優先度4、`IgnoreNew`、引数なし、設定`CTRL+ALT+M`、旧Run値削除、本体1プロセス・ランチャー1プロセスを非UIで確認した。

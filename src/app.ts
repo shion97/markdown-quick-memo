@@ -8,7 +8,16 @@ import {
   type HotkeyStatus,
   type PdfExportCompleted,
 } from "./bridge/tauri";
-import { createEditor, replaceDocument } from "./editor/editor";
+import {
+  createEditor,
+  documentCounts,
+  replaceDocument,
+} from "./editor/editor";
+import {
+  extractOutline,
+  navigateToHeading,
+  type OutlineHeading,
+} from "./editor/outline";
 import { RevisionTracker } from "./editor/revision";
 
 const DEFAULT_TITLE = "Markdown Quick Memo";
@@ -41,9 +50,12 @@ function markdownTargetAt(content: string, position: number): {
 export class MarkdownQuickMemoApplication {
   private readonly revision = new RevisionTracker();
   private readonly editorHost: HTMLElement;
+  private readonly workspace: HTMLElement;
   private readonly title: HTMLElement;
   private readonly status: HTMLElement;
   private readonly cursorPosition: HTMLElement;
+  private readonly outline: HTMLElement;
+  private readonly outlineList: HTMLElement;
   private readonly imageDialog: HTMLDialogElement;
   private readonly imageElement: HTMLImageElement;
   private readonly settingsDialog: HTMLDialogElement;
@@ -58,9 +70,12 @@ export class MarkdownQuickMemoApplication {
   constructor(private readonly root: HTMLElement) {
     this.root.innerHTML = this.layout();
     this.editorHost = this.required("#editor");
+    this.workspace = this.required("#workspace");
     this.title = this.required("#document-title");
     this.status = this.required("#status");
     this.cursorPosition = this.required("#cursor-position");
+    this.outline = this.required("#outline");
+    this.outlineList = this.required("#outline-list");
     this.imageDialog = this.requiredDialog("#image-dialog");
     this.imageElement = this.requiredImage("#preview-image");
     this.settingsDialog = this.requiredDialog("#settings-dialog");
@@ -75,6 +90,9 @@ export class MarkdownQuickMemoApplication {
       },
       onCountsChanged: (characters, words) => {
         this.status.textContent = `${characters.toLocaleString()} 文字 / ${words.toLocaleString()} 語`;
+      },
+      onOutlineChanged: (headings) => {
+        this.renderOutline(headings);
       },
       onCursorChanged: (line, column) => {
         this.cursorPosition.textContent = `${line}行 ${column}列`;
@@ -119,31 +137,35 @@ export class MarkdownQuickMemoApplication {
             <span class="brand-mark" aria-hidden="true">M</span>
             <strong id="document-title">無題.md</strong>
           </div>
-          <nav aria-label="ファイル操作">
-            <button data-action="new" title="新規 (Ctrl+N)">新規</button>
-            <button data-action="open" title="開く (Ctrl+O)">開く</button>
-            <button data-action="save" class="primary" title="保存 (Ctrl+S)">保存</button>
-            <button data-action="more" class="icon-button" aria-label="その他の操作">•••</button>
-          </nav>
+          <div class="toolbar-actions">
+            <div class="document-status" aria-label="文書情報">
+              <span id="cursor-position">1行 1列</span>
+              <span aria-hidden="true">/</span>
+              <span id="status">0 文字 / 0 語</span>
+            </div>
+            <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
+          </div>
           <div id="more-menu" class="popover" hidden>
-            <button data-action="save-as">名前を付けて保存</button>
-            <button data-action="rename">ファイル名を変更</button>
-            <button data-action="reveal">保存先を開く</button>
-            <button data-action="export-pdf">PDFへ書き出す</button>
-            <button data-action="opacity">半透明表示</button>
-            <button data-action="settings">ホットキー設定</button>
-            <button data-action="hide">待機状態へ戻す</button>
-            <button data-action="exit">完全に終了</button>
+            <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
+            <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
+            <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
+            <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
+            <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+Shift+R</kbd></button>
+            <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+Shift+E</kbd></button>
+            <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+Shift+P</kbd></button>
+            <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
+            <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
+            <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
+            <button data-action="settings" class="popover-settings"><span>ホットキー設定</span></button>
           </div>
         </header>
-        <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
-        <footer class="statusbar">
-          <span class="statusbar-left">
-            <span id="cursor-position">1行 1列</span>
-            <span id="status">0 文字 / 0 語</span>
-          </span>
-          <span>Markdown原文を保存</span>
-        </footer>
+        <section id="workspace" class="workspace">
+          <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
+          <aside id="outline" class="outline-panel" aria-label="目次" hidden>
+            <h2>目次</h2>
+            <nav id="outline-list" class="outline-list" aria-label="文書の見出し"></nav>
+          </aside>
+        </section>
       </main>
       <article id="print-root" class="print-root" aria-hidden="true"></article>
       <dialog id="image-dialog" class="image-dialog">
@@ -170,6 +192,16 @@ export class MarkdownQuickMemoApplication {
 
   private bindActions(): void {
     this.root.addEventListener("click", (event) => {
+      const heading = (event.target as HTMLElement).closest<HTMLButtonElement>(
+        "button[data-heading-position]",
+      );
+      if (heading) {
+        navigateToHeading(
+          this.editor,
+          Number(heading.dataset.headingPosition),
+        );
+        return;
+      }
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
         "button[data-action]",
       );
@@ -456,6 +488,7 @@ export class MarkdownQuickMemoApplication {
     this.currentPath = path;
     this.revision.reset();
     this.updateTitle();
+    this.updateDocumentSummary(content);
   }
 
   private loadPayload(payload: DocumentPayload): void {
@@ -467,6 +500,36 @@ export class MarkdownQuickMemoApplication {
     const name = fileName(this.currentPath);
     this.title.textContent = `${dirtyMarker}${name}`;
     document.title = `${dirtyMarker}${name} — ${DEFAULT_TITLE}`;
+  }
+
+  private updateDocumentSummary(content: string): void {
+    const counts = documentCounts(content);
+    this.status.textContent = `${counts.characters.toLocaleString()} 文字 / ${counts.words.toLocaleString()} 語`;
+    const head = this.editor.state.selection.main.head;
+    const line = this.editor.state.doc.lineAt(head);
+    this.cursorPosition.textContent = `${line.number}行 ${head - line.from + 1}列`;
+    this.renderOutline(extractOutline(this.editor.state));
+  }
+
+  private renderOutline(headings: OutlineHeading[]): void {
+    this.outlineList.replaceChildren(
+      ...headings.map((heading) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "outline-item";
+        button.textContent = heading.label;
+        button.dataset.headingPosition = String(heading.position);
+        button.style.setProperty(
+          "--outline-indent",
+          `${(heading.level - 1) * 12}px`,
+        );
+        button.title = heading.label;
+        return button;
+      }),
+    );
+    const hasOutline = headings.length > 0;
+    this.outline.hidden = !hasOutline;
+    this.workspace.classList.toggle("has-outline", hasOutline);
   }
 
   private async handleControlClick(position: number): Promise<void> {
@@ -609,10 +672,18 @@ export class MarkdownQuickMemoApplication {
   private toggleMoreMenu(): void {
     const menu = this.required("#more-menu");
     menu.hidden = !menu.hidden;
+    this.required<HTMLButtonElement>("button[data-action='more']").setAttribute(
+      "aria-expanded",
+      String(!menu.hidden),
+    );
   }
 
   private hideMoreMenu(): void {
     this.required("#more-menu").hidden = true;
+    this.required<HTMLButtonElement>("button[data-action='more']").setAttribute(
+      "aria-expanded",
+      "false",
+    );
   }
 
   private async showError(title: string, error: unknown): Promise<void> {

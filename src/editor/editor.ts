@@ -14,10 +14,12 @@ import {
 import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
 import { markdownInputAssistance } from "./input-assistance";
+import { extractOutline, type OutlineHeading } from "./outline";
 
 export interface EditorCallbacks {
   onDocumentChanged: (content: string) => void;
   onCountsChanged: (characters: number, words: number) => void;
+  onOutlineChanged: (headings: OutlineHeading[]) => void;
   onCursorChanged: (line: number, column: number) => void;
   onControlClick: (position: number) => void;
 }
@@ -65,6 +67,13 @@ function countWords(content: string): number {
   return latinWords + japaneseRuns;
 }
 
+export function documentCounts(content: string): {
+  characters: number;
+  words: number;
+} {
+  return { characters: content.length, words: countWords(content) };
+}
+
 export function createEditor(
   parent: HTMLElement,
   callbacks: EditorCallbacks,
@@ -101,7 +110,9 @@ export function createEditor(
         window.clearTimeout(countTimer);
       }
       countTimer = window.setTimeout(() => {
-        callbacks.onCountsChanged(content.length, countWords(content));
+        const counts = documentCounts(content);
+        callbacks.onCountsChanged(counts.characters, counts.words);
+        callbacks.onOutlineChanged(extractOutline(update.state));
       }, 120);
     }),
     EditorView.domEventHandlers({

@@ -85,7 +85,11 @@ pnpm tauri dev
 
 - 見出し、太字、斜体、取り消し線、インラインコード、コードブロック、引用、リスト、チェックリスト、表、水平線、リンク、画像を装飾します。
 - カーソルまたは選択範囲に重なる箇所はMarkdown原文へ戻し、直接編集できます。
-- 行番号ガターは表示せず、現在位置をステータスバー左下へ「行・列」で表示します。
+- 斜体フォントを持たない日本語フォントでも、疑似斜体を使って斜体表示を維持します。
+- 行番号ガターは表示せず、行・列、文字数、単語数を上部へ表示します。
+- `#`から`######`の見出しから目次を作成します。画面幅1200px以上では右側へ常時表示し、狭い画面では右端へマウスを置くと表示します。
+- 目次の項目を選ぶと、対応する見出しへカーソルと表示位置が移動します。
+- 右上の三点メニューには、ファイル操作などの主な操作とショートカットをコンパクトに表示します。
 - インライン数式は`$E=mc^2$`、独立数式は`$$\frac{a}{b}$$`で記述します。
 - KaTeXは`trust: false`で実行し、入力長、展開数、表示サイズに上限を設けます。
 - 不正または上限を超える数式は、UIを停止させず原文へフォールバックします。
@@ -130,8 +134,10 @@ RustコマンドはMSVC環境を読み込んだシェルで実行してくださ
 Tauri本体、Rustランチャー、NSIS、MSIを作成します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_tauri.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
+
+`build.ps1`はTauri版の`build_tauri.ps1`を呼び出す標準入口です。
 
 主な生成物は次のとおりです。
 
@@ -143,14 +149,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_tauri.ps1
 ## ログオン登録
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_tauri_shortcut.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
 ```
 
 別のキーを初期設定する場合は、例えば次のように指定します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_tauri_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
 ```
+
+`create_shortcut.ps1`はTauri版の`create_tauri_shortcut.ps1`を呼び出す標準入口です。
 
 スクリプトは優先度4、多重起動`IgnoreNew`のログオンタスクを登録します。登録できない場合は現在ユーザーの`Run`キーへフォールバックします。アプリ内のホットキー設定では、登録失敗時に元のキーへロールバックします。
 
