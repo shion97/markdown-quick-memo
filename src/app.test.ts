@@ -3,7 +3,17 @@
 import { searchPanelOpen } from "@codemirror/search";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { backend } from "./bridge/tauri";
 import { MarkdownQuickMemoApplication } from "./app";
+
+const dialogMocks = vi.hoisted(() => ({
+  ask: vi.fn(),
+  message: vi.fn(),
+  open: vi.fn(),
+  save: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => dialogMocks);
 
 if (!window.Range.prototype.getClientRects) {
   Object.defineProperty(window.Range.prototype, "getClientRects", {
@@ -14,8 +24,32 @@ if (!window.Range.prototype.getClientRects) {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
   document.body.replaceChildren();
 });
+
+function setApplicationDocument(
+  application: MarkdownQuickMemoApplication,
+  content: string,
+  path: string | null,
+): void {
+  (
+    application as unknown as {
+      setDocument(document: string, documentPath: string | null): void;
+    }
+  ).setDocument(content, path);
+}
+
+function saveApplicationDocument(
+  application: MarkdownQuickMemoApplication,
+): Promise<boolean> {
+  return (
+    application as unknown as {
+      saveDocument(saveAs: boolean): Promise<boolean>;
+    }
+  ).saveDocument(false);
+}
 
 describe("MarkdownQuickMemoApplication", () => {
   it("上部へ文書情報とコンパクトな主操作一覧を配置する", () => {
@@ -565,6 +599,145 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
       "0 / 0 件",
     );
+  });
+
+  it("保存済み文書は入力停止から1秒後に自動保存する", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "初期", path);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const saveDocument = vi
+      .spyOn(backend, "saveDocument")
+      .mockResolvedValue({ path, revision: 1 });
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "更新" } });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(saveDocument).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(saveDocument).toHaveBeenCalledOnce();
+    expect(saveDocument).toHaveBeenCalledWith("初期更新", 1, undefined);
+    expect(root.querySelector("#document-title")?.textContent).toBe("memo.md");
+  });
+
+  it("未保存の新規文書は自動保存しない", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "", null);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const saveDocument = vi.spyOn(backend, "saveDocument");
+
+    view.dispatch({ changes: { from: 0, insert: "未保存" } });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(saveDocument).not.toHaveBeenCalled();
+    expect(dialogMocks.save).not.toHaveBeenCalled();
+  });
+
+  it("手動保存は即時実行し、待機中の自動保存を重複させない", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "初期", path);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const saveDocument = vi
+      .spyOn(backend, "saveDocument")
+      .mockResolvedValue({ path, revision: 1 });
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "更新" } });
+    await saveApplicationDocument(application);
+
+    expect(saveDocument).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(saveDocument).toHaveBeenCalledOnce();
+  });
+
+  it("文書切替時は旧文書の自動保存タイマーを解除する", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "旧文書", "C:\\old.md");
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const saveDocument = vi.spyOn(backend, "saveDocument");
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "更新" } });
+    setApplicationDocument(application, "新文書", "C:\\new.md");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(saveDocument).not.toHaveBeenCalled();
+  });
+
+  it("自動保存中の追加入力は最新リビジョンを再保存する", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "初期", path);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    let finishFirstSave: ((result: { path: string; revision: number }) => void) | undefined;
+    const saveDocument = vi
+      .spyOn(backend, "saveDocument")
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ path, revision: 2 });
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "1" } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(saveDocument).toHaveBeenCalledWith("初期1", 1, undefined);
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "2" } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(saveDocument).toHaveBeenCalledOnce();
+
+    finishFirstSave?.({ path, revision: 1 });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(saveDocument).toHaveBeenCalledTimes(2);
+    expect(saveDocument).toHaveBeenLastCalledWith("初期12", 2, undefined);
+  });
+
+  it("自動保存失敗時は未保存状態を保ち、入力なしでは再試行しない", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "初期", path);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const saveDocument = vi
+      .spyOn(backend, "saveDocument")
+      .mockRejectedValue(new Error("保存失敗"));
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "更新" } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.resolve();
+
+    expect(saveDocument).toHaveBeenCalledOnce();
+    expect(dialogMocks.message).toHaveBeenCalledOnce();
+    expect(root.querySelector("#document-title")?.textContent).toBe("● memo.md");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(saveDocument).toHaveBeenCalledOnce();
   });
 
   it("三点メニューを外側クリックで閉じる", () => {

@@ -26,6 +26,7 @@ const DEFAULT_TITLE = "Markdown Quick Memo";
 const OUTLINE_MIN_WIDTH = 240;
 const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
+const AUTO_SAVE_DELAY_MS = 1_000;
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -70,6 +71,7 @@ export class MarkdownQuickMemoApplication {
   private currentPath: string | null = null;
   private suppressChanges = false;
   private saving = false;
+  private autoSaveTimer: number | undefined;
   private translucent = false;
   private outlineWidth = OUTLINE_MIN_WIDTH;
   private readonly collapsedOutlineKeys = new Set<string>();
@@ -96,6 +98,7 @@ export class MarkdownQuickMemoApplication {
         if (!this.suppressChanges) {
           this.revision.changed();
           this.updateTitle();
+          this.scheduleAutoSave();
         }
       },
       onCountsChanged: (characters, words) => {
@@ -461,6 +464,7 @@ export class MarkdownQuickMemoApplication {
     if (this.saving) {
       return false;
     }
+    this.cancelAutoSave();
     let requestedPath: string | undefined;
     if (saveAs || !this.currentPath) {
       const selected = await save({
@@ -468,6 +472,7 @@ export class MarkdownQuickMemoApplication {
         filters: [{ name: "Markdown", extensions: ["md"] }],
       });
       if (typeof selected !== "string") {
+        this.scheduleAutoSave();
         return false;
       }
       requestedPath = selected;
@@ -482,8 +487,11 @@ export class MarkdownQuickMemoApplication {
         requestedPath,
       );
       this.currentPath = result.path;
-      this.revision.acceptSavedRevision(result.revision);
+      const accepted = this.revision.acceptSavedRevision(result.revision);
       this.updateTitle();
+      if (!accepted && this.autoSaveTimer === undefined) {
+        this.scheduleAutoSave();
+      }
       return true;
     } catch (error) {
       await this.showError("保存できませんでした", error);
@@ -491,6 +499,36 @@ export class MarkdownQuickMemoApplication {
     } finally {
       this.saving = false;
     }
+  }
+
+  private scheduleAutoSave(): void {
+    this.cancelAutoSave();
+    if (!this.currentPath || !this.revision.dirty) {
+      return;
+    }
+    this.autoSaveTimer = window.setTimeout(() => {
+      this.autoSaveTimer = undefined;
+      void this.autoSaveCurrentDocument();
+    }, AUTO_SAVE_DELAY_MS);
+  }
+
+  private cancelAutoSave(): void {
+    if (this.autoSaveTimer === undefined) {
+      return;
+    }
+    window.clearTimeout(this.autoSaveTimer);
+    this.autoSaveTimer = undefined;
+  }
+
+  private async autoSaveCurrentDocument(): Promise<void> {
+    if (!this.currentPath || !this.revision.dirty) {
+      return;
+    }
+    if (this.saving) {
+      this.scheduleAutoSave();
+      return;
+    }
+    await this.saveDocument(false);
   }
 
   private async renameDocument(): Promise<void> {
@@ -616,6 +654,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private setDocument(content: string, path: string | null): void {
+    this.cancelAutoSave();
     this.suppressChanges = true;
     replaceDocument(this.editor, content);
     this.suppressChanges = false;
