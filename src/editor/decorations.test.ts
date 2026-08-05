@@ -133,6 +133,7 @@ describe("markdownDecorations", () => {
   });
 
   it("長い半角・全角引用へ折り返し用の行装飾を適用する", () => {
+    loadApplicationStyles();
     const source = [
       `> ${"a".repeat(160)}`,
       `> ${"あ".repeat(160)}`,
@@ -149,7 +150,36 @@ describe("markdownDecorations", () => {
       expect(line.getAttribute("style")).toContain(
         "--mqm-quote-marker-width: 1em",
       );
+      expect(window.getComputedStyle(line).position).toBe("relative");
+      expect(window.getComputedStyle(line).textIndent).toBe("0px");
+
+      const markers = line.querySelector<HTMLElement>(".mqm-quote-markers");
+      expect(markers).not.toBeNull();
+      expect(window.getComputedStyle(markers!).position).toBe("absolute");
+      expect(window.getComputedStyle(markers!).top).toBe("0px");
+      expect(window.getComputedStyle(markers!).bottom).toBe("0px");
     }
+    expect(quoteLines[0]?.textContent).toBe("a".repeat(160));
+    expect(quoteLines[1]?.textContent).toBe("あ".repeat(160));
+  });
+
+  it("編集中の長い引用は原文だけを先頭へ戻し、折り返し位置を維持する", () => {
+    loadApplicationStyles();
+    const source = `> ${"a".repeat(160)}`;
+    const parent = renderDocument(source, 2);
+    const quoteLine = parent.querySelector<HTMLElement>(
+      ".mqm-quote-line-active",
+    );
+
+    expect(quoteLine?.textContent).toBe(source);
+    expect(
+      window
+        .getComputedStyle(quoteLine!)
+        .getPropertyValue("--mqm-quote-prefix-width"),
+    ).toContain("--mqm-quote-source-width");
+    expect(window.getComputedStyle(quoteLine!).textIndent).toContain(
+      "--mqm-quote-source-width",
+    );
   });
 
   it("標準チェックリストは別行へ移動するとチェック枠へ変換する", () => {

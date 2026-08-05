@@ -478,31 +478,40 @@ button.primary:hover {
 
 .mqm-quote-line {
   --mqm-quote-prefix-width: calc(
-    var(--mqm-quote-marker-width, 1em) +
-      var(--mqm-quote-source-width, 0ch) + 0.25em
+    var(--mqm-quote-marker-width, 1em) + 0.25em
   );
+  position: relative;
   padding-left: var(--mqm-quote-prefix-width) !important;
   background: var(--surface-muted);
   color: color-mix(in srgb, var(--text) 80%, var(--muted));
   overflow-wrap: anywhere !important;
-  text-indent: calc(0px - var(--mqm-quote-prefix-width));
+  text-indent: 0;
   word-break: normal !important;
 }
 
+.mqm-quote-line-active {
+  --mqm-quote-prefix-width: calc(
+    var(--mqm-quote-marker-width, 1em) +
+      var(--mqm-quote-source-width, 0ch)
+  );
+  text-indent: calc(0px - var(--mqm-quote-source-width, 0ch));
+}
+
 .mqm-quote-markers {
-  display: inline-flex;
-  height: 1.75em;
-  margin-right: 0.25em;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: stretch;
   text-indent: 0;
-  vertical-align: middle;
   user-select: none;
 }
 
 .mqm-quote-marker {
   position: relative;
-  display: inline-block;
+  display: block;
   width: 1em;
-  height: 100%;
   border-left: 4px solid color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
