@@ -501,7 +501,7 @@ button.primary:hover {
   color: color-mix(in srgb, var(--text) 80%, var(--muted));
   overflow-wrap: anywhere !important;
   text-indent: 0;
-  word-break: normal !important;
+  word-break: break-all !important;
 }
 
 .mqm-quote-line-active {

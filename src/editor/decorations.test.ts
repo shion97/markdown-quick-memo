@@ -154,9 +154,13 @@ describe("markdownDecorations", () => {
 
   it("長い半角・全角引用へ折り返し用の行装飾を適用する", () => {
     loadApplicationStyles();
+    const continuousAscii = "a".repeat(160);
+    const spacedAscii = Array.from({ length: 80 }, () => "word").join(" ");
+    const fullWidth = "あ".repeat(160);
     const source = [
-      `> ${"a".repeat(160)}`,
-      `> ${"あ".repeat(160)}`,
+      `> ${continuousAscii}`,
+      `> ${spacedAscii}`,
+      `> ${fullWidth}`,
       "",
       "カーソル位置",
     ].join("\n");
@@ -165,13 +169,15 @@ describe("markdownDecorations", () => {
       parent.querySelectorAll<HTMLElement>(".mqm-quote-line"),
     );
 
-    expect(quoteLines).toHaveLength(2);
+    expect(quoteLines).toHaveLength(3);
     for (const line of quoteLines) {
       expect(line.getAttribute("style")).toContain(
         "--mqm-quote-marker-width: 1em",
       );
       expect(window.getComputedStyle(line).position).toBe("relative");
+      expect(window.getComputedStyle(line).overflowWrap).toBe("anywhere");
       expect(window.getComputedStyle(line).textIndent).toBe("0px");
+      expect(window.getComputedStyle(line).wordBreak).toBe("break-all");
 
       const markers = line.querySelector<HTMLElement>(".mqm-quote-markers");
       expect(markers).not.toBeNull();
@@ -179,8 +185,9 @@ describe("markdownDecorations", () => {
       expect(window.getComputedStyle(markers!).top).toBe("0px");
       expect(window.getComputedStyle(markers!).bottom).toBe("0px");
     }
-    expect(quoteLines[0]?.textContent).toBe("a".repeat(160));
-    expect(quoteLines[1]?.textContent).toBe("あ".repeat(160));
+    expect(quoteLines[0]?.textContent).toBe(continuousAscii);
+    expect(quoteLines[1]?.textContent).toBe(spacedAscii);
+    expect(quoteLines[2]?.textContent).toBe(fullWidth);
   });
 
   it("編集中の長い引用は原文だけを先頭へ戻し、折り返し位置を維持する", () => {
@@ -200,6 +207,8 @@ describe("markdownDecorations", () => {
     expect(window.getComputedStyle(quoteLine!).textIndent).toContain(
       "--mqm-quote-source-width",
     );
+    expect(window.getComputedStyle(quoteLine!).overflowWrap).toBe("anywhere");
+    expect(window.getComputedStyle(quoteLine!).wordBreak).toBe("break-all");
   });
 
   it("標準チェックリストは別行へ移動するとチェック枠へ変換する", () => {
