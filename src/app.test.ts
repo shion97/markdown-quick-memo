@@ -429,7 +429,7 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
   });
 
-  it("日本語検索パネルをCtrl+Fで開閉し、現行の検索・置換機能を維持する", () => {
+  it("日本語検索パネルへ件数と現在位置を表示し、検索・置換へ追従する", async () => {
     const root = document.createElement("div");
     document.body.append(root);
     new MarkdownQuickMemoApplication(root);
@@ -458,14 +458,42 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(root.querySelector(".cm-search input[name='case']")).not.toBeNull();
     expect(root.querySelector(".cm-search input[name='re']")).not.toBeNull();
     expect(root.querySelector(".cm-search input[name='word']")).not.toBeNull();
+    await new Promise<void>((resolve) => window.queueMicrotask(resolve));
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "0 / 0 件",
+    );
 
     searchInput.value = "日本語";
     searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise<void>((resolve) => window.queueMicrotask(resolve));
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "1 / 2 件",
+    );
     root.querySelector<HTMLButtonElement>(
       ".cm-search button[name='next']",
     )?.click();
     const selection = view.state.selection.main;
     expect(view.state.sliceDoc(selection.from, selection.to)).toBe("日本語");
+    root.querySelector<HTMLButtonElement>(
+      ".cm-search button[name='next']",
+    )?.click();
+    await new Promise<void>((resolve) => window.queueMicrotask(resolve));
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "2 / 2 件",
+    );
+
+    const replaceInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='replace']",
+    )!;
+    replaceInput.value = "置換済み";
+    replaceInput.dispatchEvent(new Event("change", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>(
+      ".cm-search button[name='replace']",
+    )?.click();
+    await new Promise<void>((resolve) => window.queueMicrotask(resolve));
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "1 / 1 件",
+    );
 
     searchInput.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -476,6 +504,67 @@ describe("MarkdownQuickMemoApplication", () => {
       }),
     );
     expect(searchPanelOpen(view.state)).toBe(false);
+  });
+
+  it("検索件数は大文字小文字・単語単位・無効な正規表現を反映する", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    view.dispatch({ changes: { from: 0, insert: "Memo memo memo2" } });
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "f",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    const searchInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='search']",
+    )!;
+    const caseInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='case']",
+    )!;
+    const wordInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='word']",
+    )!;
+    const regexpInput = root.querySelector<HTMLInputElement>(
+      ".cm-search input[name='re']",
+    )!;
+    const flushStatus = (): Promise<void> =>
+      new Promise((resolve) => window.queueMicrotask(resolve));
+
+    searchInput.value = "Memo";
+    searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushStatus();
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "1 / 3 件",
+    );
+
+    caseInput.checked = true;
+    caseInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushStatus();
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "1 / 1 件",
+    );
+
+    caseInput.checked = false;
+    wordInput.checked = true;
+    wordInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushStatus();
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "1 / 2 件",
+    );
+
+    searchInput.value = "[";
+    regexpInput.checked = true;
+    regexpInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushStatus();
+    expect(root.querySelector(".mqm-search-match-status")?.textContent).toBe(
+      "0 / 0 件",
+    );
   });
 
   it("三点メニューを外側クリックで閉じる", () => {

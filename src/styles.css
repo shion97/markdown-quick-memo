@@ -273,6 +273,15 @@ button.primary:hover {
   color: var(--muted);
 }
 
+.editor-host .cm-panel.cm-search .mqm-search-match-status {
+  flex: 0 0 auto;
+  min-width: 5em;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .outline-panel {
   position: absolute;
   z-index: 8;
