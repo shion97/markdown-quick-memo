@@ -668,6 +668,61 @@ function inlineMarkerDecorations(
   return results;
 }
 
+function linkDecorations(
+  state: EditorState,
+  segment: DocumentSegment,
+): { from: number; to: number; decoration: Decoration }[] {
+  const results: { from: number; to: number; decoration: Decoration }[] = [];
+  syntaxTree(state).iterate({
+    from: segment.from,
+    to: segment.to,
+    enter: (node) => {
+      if (node.name !== "Link") {
+        return;
+      }
+      if (selectionTouches(state, node.from, node.to)) {
+        return false;
+      }
+
+      const linkMarks: { from: number; to: number }[] = [];
+      let child = node.node.firstChild;
+      while (child) {
+        if (child.name === "LinkMark") {
+          linkMarks.push({ from: child.from, to: child.to });
+        }
+        child = child.nextSibling;
+      }
+      const openingMark = linkMarks[0];
+      const closingLabelMark = linkMarks[1];
+      if (
+        !openingMark ||
+        !closingLabelMark ||
+        openingMark.to >= closingLabelMark.from
+      ) {
+        return false;
+      }
+
+      results.push({
+        from: node.from,
+        to: openingMark.to,
+        decoration: Decoration.replace({}),
+      });
+      results.push({
+        from: openingMark.to,
+        to: closingLabelMark.from,
+        decoration: Decoration.mark({ class: "mqm-link-text" }),
+      });
+      results.push({
+        from: closingLabelMark.from,
+        to: node.to,
+        decoration: Decoration.replace({}),
+      });
+      return false;
+    },
+  });
+  return results;
+}
+
 function fencedCodeDecorations(
   state: EditorState,
   segment: DocumentSegment,
@@ -746,6 +801,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
 
   entries.push(...lineDecorations(state, segment));
   entries.push(...inlineMarkerDecorations(state, segment));
+  entries.push(...linkDecorations(state, segment));
   entries.push(...fencedCodeDecorations(state, segment));
   const text = state.doc.sliceString(segment.from, segment.to);
   for (const math of findMathRanges(

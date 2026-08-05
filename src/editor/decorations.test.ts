@@ -111,6 +111,26 @@ describe("markdownDecorations", () => {
     expect(parent.querySelector(".mqm-heading-1")?.textContent).toBe("見出し");
   });
 
+  it("非選択のMarkdownリンクは名前だけをリンクとして装飾する", () => {
+    const source = "前 [名前](https://example.com) 後\n\nカーソル位置";
+    const parent = renderDocument(source);
+    const link = parent.querySelector<HTMLElement>(".mqm-link-text");
+    const editorElement = parent.querySelector<HTMLElement>(".cm-editor");
+    const view = EditorView.findFromDOM(editorElement!);
+
+    expect(link?.textContent).toBe("名前");
+    expect(parent.textContent).not.toContain("https://example.com");
+    expect(view?.state.doc.toString()).toBe(source);
+  });
+
+  it("選択中のMarkdownリンクは原文へ戻す", () => {
+    const source = "[名前](https://example.com)";
+    const parent = renderDocument(source, source.indexOf("名前") + 1);
+
+    expect(parent.querySelector(".mqm-link-text")).toBeNull();
+    expect(parent.textContent).toContain(source);
+  });
+
   it("引用階層ごとに一文字幅で縦線を追加する", () => {
     const parent = renderDocument(
       "> 一階層\n> > 二階層\n> > > 三階層\n\nカーソル位置",
