@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { languages } from "@codemirror/language-data";
 import { searchPanelOpen } from "@codemirror/search";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,6 +53,38 @@ function saveApplicationDocument(
 }
 
 describe("MarkdownQuickMemoApplication", () => {
+  it("Juliaコードブロックを言語別にハイライトする", async () => {
+    const julia = languages.find((language) => language.name === "Julia");
+    expect(julia).toBeDefined();
+    await julia!.load();
+
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(
+      application,
+      [
+        "```julia",
+        "function square(value)",
+        "  println(\"value\")",
+        "  return value ^ 2",
+        "end",
+        "```",
+      ].join("\n"),
+      null,
+    );
+
+    expect(root.querySelector(".mqm-syntax-keyword")?.textContent).toBe(
+      "function",
+    );
+    expect(root.querySelector(".mqm-syntax-string")?.textContent).toBe(
+      '"value"',
+    );
+    expect(root.querySelector(".mqm-syntax-constant")?.textContent).toBe("2");
+    expect(root.querySelector(".mqm-code-block-line")).not.toBeNull();
+    expect(root.querySelector(".mqm-code-language")?.textContent).toBe("julia");
+  });
+
   it("上部へ文書情報とコンパクトな主操作一覧を配置する", () => {
     const root = document.createElement("div");
     document.body.append(root);

@@ -1,7 +1,12 @@
+import hljs from "highlight.js/lib/common";
+import julia from "highlight.js/lib/languages/julia";
 import MarkdownIt, { type PluginSimple } from "markdown-it";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 import { renderMath } from "./editor/math";
+
+hljs.registerLanguage("julia", julia);
+hljs.registerAliases("jl", { languageName: "julia" });
 
 const mathPlugin: PluginSimple = (markdown) => {
   markdown.inline.ruler.before(
@@ -118,6 +123,16 @@ const renderer = new MarkdownIt({
   linkify: true,
   breaks: false,
   typographer: false,
+  highlight(code, language) {
+    const normalizedLanguage = language.trim().toLowerCase();
+    if (!normalizedLanguage || !hljs.getLanguage(normalizedLanguage)) {
+      return "";
+    }
+    return hljs.highlight(code, {
+      language: normalizedLanguage,
+      ignoreIllegals: true,
+    }).value;
+  },
 }).use(mathPlugin);
 
 function firstTextNode(
