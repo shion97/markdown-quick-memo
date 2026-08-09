@@ -179,12 +179,47 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-table-empty-cell")).toHaveLength(1);
     expect(
       window.getComputedStyle(parent.querySelector(".mqm-table-row")!).display,
-    ).toBe("grid");
+    ).toBe("flex");
 
     const position = view.state.doc.toString().indexOf("名前");
     view.dispatch({ changes: { from: position, to: position + 2, insert: "氏名" } });
     expect(view.state.doc.toString()).toContain("| 氏名 \\| 別名 | |");
     expect(parent.querySelectorAll(".mqm-table-row")).toHaveLength(2);
+  });
+
+  it("2列から4列の表を行ごとに均等配置する", () => {
+    loadApplicationStyles();
+
+    for (const tableSize of [2, 3, 4]) {
+      const heading = Array.from(
+        { length: tableSize },
+        (_, columnIndex) => `見出し${columnIndex + 1}`,
+      );
+      const separator = Array.from({ length: tableSize }, () => "---");
+      const bodyRows = Array.from({ length: tableSize - 1 }, (_, rowIndex) =>
+        Array.from(
+          { length: tableSize },
+          (_, columnIndex) => `${rowIndex + 1}-${columnIndex + 1}`,
+        ),
+      );
+      const source = [heading, separator, ...bodyRows]
+        .map((row) => `| ${row.join(" | ")} |`)
+        .join("\n");
+      const parent = renderDocument(source);
+      const tableRows = parent.querySelectorAll<HTMLElement>(".mqm-table-row");
+
+      expect(tableRows).toHaveLength(tableSize);
+      for (const tableRow of tableRows) {
+        const cells = tableRow.querySelectorAll<HTMLElement>(
+          ":scope > .mqm-table-cell",
+        );
+        expect(cells).toHaveLength(tableSize);
+        expect(window.getComputedStyle(tableRow).display).toBe("flex");
+        for (const cell of cells) {
+          expect(window.getComputedStyle(cell).flexGrow).toBe("1");
+        }
+      }
+    }
   });
 
   it("編集中の数式と水平線は装飾と原文を併記する", () => {
