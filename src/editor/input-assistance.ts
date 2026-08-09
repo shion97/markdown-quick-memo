@@ -9,7 +9,12 @@ import {
   selectLineUp,
 } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type Extension, Prec } from "@codemirror/state";
+import {
+  type ChangeSpec,
+  EditorSelection,
+  type Extension,
+  Prec,
+} from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tableRowRanges } from "./decorations";
 
@@ -28,6 +33,8 @@ interface TextChange {
 const LIST_PATTERN =
   /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/;
 const QUOTE_PATTERN = /^((?:[ \t]*>[ \t]?)+)(.*)$/;
+const NORMAL_INDENT = "    ";
+const LIST_INDENT = "  ";
 
 function reducedQuotePrefix(prefix: string): string {
   return prefix.slice(0, prefix.lastIndexOf(">"));
@@ -168,39 +175,94 @@ function deleteQuoteSpace(view: EditorView): boolean {
   return true;
 }
 
-function indentList(view: EditorView, remove: boolean): boolean {
-  const line = view.state.doc.lineAt(view.state.selection.main.head);
-  const list = LIST_PATTERN.exec(line.text);
-  if (!list) {
+function deleteSoftIndent(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (view.state.selection.ranges.length !== 1 || !selection.empty) {
     return false;
   }
-  const quoteLength = (list[1] ?? "").length;
-  const indentLength = (list[2] ?? "").length;
-  const indentationPosition = line.from + quoteLength;
-  if (remove) {
-    const removable = Math.min(2, indentLength);
-    if (removable === 0) {
-      return true;
-    }
-    view.dispatch({
-      changes: {
-        from: indentationPosition,
-        to: indentationPosition + removable,
-        insert: "",
-      },
-      userEvent: "input",
-    });
-  } else {
-    view.dispatch({
-      changes: { from: indentationPosition, insert: "  " },
-      userEvent: "input",
-    });
+  const line = view.state.doc.lineAt(selection.head);
+  const beforeCursor = line.text.slice(0, selection.head - line.from);
+  if (!/^ +$/.test(beforeCursor)) {
+    return false;
   }
+  const removable = Math.min(NORMAL_INDENT.length, beforeCursor.length);
+  view.dispatch({
+    changes: { from: selection.head - removable, to: selection.head },
+    selection: { anchor: selection.head - removable },
+    userEvent: "delete.backward",
+  });
   return true;
 }
 
+function handleBackspace(view: EditorView): boolean {
+  return deleteQuoteSpace(view) || deleteSoftIndent(view);
+}
+
+function indentationChange(
+  view: EditorView,
+  line: { from: number; text: string },
+  remove: boolean,
+): ChangeSpec | null {
+  const list = inCodeBlock(view, line.from)
+    ? null
+    : LIST_PATTERN.exec(line.text);
+  const quoteLength = (list?.[1] ?? "").length;
+  const indentation = list?.[2] ?? /^ */.exec(line.text)?.[0] ?? "";
+  const indentationPosition = line.from + quoteLength;
+  const indent = list ? LIST_INDENT : NORMAL_INDENT;
+  if (!remove) {
+    return { from: indentationPosition, insert: indent };
+  }
+  const removable = Math.min(indent.length, indentation.length);
+  return removable === 0
+    ? null
+    : { from: indentationPosition, to: indentationPosition + removable };
+}
+
+function changeSelectedLines(view: EditorView, remove: boolean): void {
+  const selection = view.state.selection.main;
+  const changes: ChangeSpec[] = [];
+  for (let position = selection.from; position <= selection.to; ) {
+    const line = view.state.doc.lineAt(position);
+    if (selection.empty || selection.to > line.from) {
+      const change = indentationChange(view, line, remove);
+      if (change) {
+        changes.push(change);
+      }
+    }
+    position = line.to + 1;
+  }
+  const changeSet = view.state.changes(changes);
+  view.dispatch({
+    changes: changeSet,
+    selection: EditorSelection.range(
+      changeSet.mapPos(selection.anchor, 1),
+      changeSet.mapPos(selection.head, 1),
+    ),
+    userEvent: "input.indent",
+  });
+}
+
 function handleTab(view: EditorView, remove: boolean): boolean {
-  indentList(view, remove);
+  const selection = view.state.selection.main;
+  if (!selection.empty) {
+    changeSelectedLines(view, remove);
+    return true;
+  }
+  const line = view.state.doc.lineAt(selection.head);
+  const list = inCodeBlock(view, line.from) ? null : LIST_PATTERN.exec(line.text);
+  if (list || remove) {
+    const change = indentationChange(view, line, remove);
+    if (change) {
+      view.dispatch({ changes: change, userEvent: "input.indent" });
+    }
+    return true;
+  }
+  view.dispatch({
+    changes: { from: selection.head, insert: NORMAL_INDENT },
+    selection: { anchor: selection.head + NORMAL_INDENT.length },
+    userEvent: "input",
+  });
   return true;
 }
 
@@ -362,7 +424,7 @@ export function markdownInputAssistance(): Extension {
     Prec.highest(
       keymap.of([
         { key: "Enter", run: insertContinuation },
-        { key: "Backspace", run: deleteQuoteSpace },
+        { key: "Backspace", run: handleBackspace },
         { key: "Shift-Enter", run: insertPlainLineBreak },
         { key: "Tab", run: (view) => handleTab(view, false) },
         { key: "Shift-Tab", run: (view) => handleTab(view, true) },
