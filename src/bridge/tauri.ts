@@ -89,10 +89,11 @@ export function onBackendPayload<T>(
   });
 }
 
-export async function nextBackendPayload<T>(
+export async function invokeWithBackendPayload<T>(
   eventName: string,
   timeoutMs: number,
-): Promise<Promise<T>> {
+  invokeAction: () => Promise<unknown>,
+): Promise<T> {
   let resolvePayload: ((payload: T) => void) | undefined;
   let rejectPayload: ((reason: Error) => void) | undefined;
   const payload = new Promise<T>((resolve, reject) => {
@@ -107,8 +108,12 @@ export async function nextBackendPayload<T>(
       new Error(`${eventName}が${timeoutMs / 1_000}秒以内に完了しませんでした。`),
     );
   }, timeoutMs);
-  return payload.finally(() => {
+
+  try {
+    await invokeAction();
+    return await payload;
+  } finally {
     window.clearTimeout(timeout);
     unlisten();
-  });
+  }
 }

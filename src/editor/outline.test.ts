@@ -142,10 +142,14 @@ describe("navigateToHeading", () => {
     });
     views.push(view);
     const [heading] = extractOutline(view.state);
+    const scrollIntoView = vi.spyOn(EditorView, "scrollIntoView");
 
     navigateToHeading(view, heading!.position);
 
     expect(view.state.selection.main.head).toBe(heading?.position);
     expect(view.hasFocus).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledWith(heading?.position, {
+      y: "center",
+    });
   });
 });

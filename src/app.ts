@@ -1,7 +1,7 @@
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   backend,
-  nextBackendPayload,
+  invokeWithBackendPayload,
   onBackendEvent,
   onBackendPayload,
   type DocumentPayload,
@@ -12,6 +12,7 @@ import {
   createEditor,
   documentCounts,
   replaceDocument,
+  setPreviewOnly,
 } from "./editor/editor";
 import {
   buildOutlineTree,
@@ -26,6 +27,7 @@ const DEFAULT_TITLE = "Markdown Quick Memo";
 const OUTLINE_MIN_WIDTH = 240;
 const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
+const AUTO_SAVE_DELAY_MS = 1_000;
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -70,9 +72,13 @@ export class MarkdownQuickMemoApplication {
   private currentPath: string | null = null;
   private suppressChanges = false;
   private saving = false;
+  private autoSaveTimer: number | undefined;
   private translucent = false;
   private outlineWidth = OUTLINE_MIN_WIDTH;
   private readonly collapsedOutlineKeys = new Set<string>();
+  private outlineNavigationActive = false;
+  private selectedOutlineKey: string | null = null;
+  private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
     this.root.innerHTML = this.layout();
@@ -93,6 +99,7 @@ export class MarkdownQuickMemoApplication {
         if (!this.suppressChanges) {
           this.revision.changed();
           this.updateTitle();
+          this.scheduleAutoSave();
         }
       },
       onCountsChanged: (characters, words) => {
@@ -151,6 +158,7 @@ export class MarkdownQuickMemoApplication {
               <span aria-hidden="true">/</span>
               <span id="status">0 文字 / 0 語</span>
             </div>
+            <button data-action="preview" class="mode-toggle" aria-pressed="false">閲覧モード</button>
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
           </div>
           <div id="more-menu" class="popover" hidden>
@@ -160,9 +168,9 @@ export class MarkdownQuickMemoApplication {
               <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
               <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
               <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
-              <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+Shift+R</kbd></button>
-              <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+Shift+E</kbd></button>
-              <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+Shift+P</kbd></button>
+              <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+R</kbd></button>
+              <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+E</kbd></button>
+              <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+P</kbd></button>
             </section>
             <section class="popover-group" aria-labelledby="shortcut-edit-heading">
               <h2 id="shortcut-edit-heading">編集</h2>
@@ -170,7 +178,7 @@ export class MarkdownQuickMemoApplication {
               <div class="shortcut-row"><span>検索</span><kbd>Ctrl+F</kbd></div>
               <div class="shortcut-row"><span>表を挿入</span><kbd>Ctrl+T</kbd></div>
               <div class="shortcut-row"><span>太字 / 斜体</span><kbd>Ctrl+B / Ctrl+I</kbd></div>
-              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+Shift+X</kbd></div>
+              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+X</kbd></div>
               <div class="shortcut-row"><span>リストを深く / 浅く</span><kbd>Tab / Shift+Tab</kbd></div>
               <div class="shortcut-row"><span>単純改行</span><kbd>Shift+Enter</kbd></div>
               <div class="shortcut-row"><span>リンク・画像を開く</span><kbd>Ctrl+クリック</kbd></div>
@@ -178,7 +186,9 @@ export class MarkdownQuickMemoApplication {
             <section class="popover-group" aria-labelledby="shortcut-window-heading">
               <h2 id="shortcut-window-heading">表示・終了</h2>
               <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
-              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
+              <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
+              <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
+              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+H</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
             </section>
@@ -226,10 +236,17 @@ export class MarkdownQuickMemoApplication {
     this.root.addEventListener(
       "keydown",
       (event) => {
+        this.handleOutlineNavigationShortcut(event);
         this.handleOutlineWidthShortcut(event);
       },
       { capture: true },
     );
+    this.root.addEventListener("keyup", (event) => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        this.resetOutlineNavigationHold();
+      }
+    });
+    window.addEventListener("blur", () => this.resetOutlineNavigationHold());
     this.root.addEventListener("click", (event) => {
       const outlineToggle = (
         event.target as HTMLElement
@@ -242,6 +259,9 @@ export class MarkdownQuickMemoApplication {
         "button[data-heading-position]",
       );
       if (heading) {
+        if (this.outlineNavigationActive) {
+          this.selectOutlineButton(heading, false);
+        }
         navigateToHeading(
           this.editor,
           Number(heading.dataset.headingPosition),
@@ -292,6 +312,7 @@ export class MarkdownQuickMemoApplication {
       rename: () => this.renameDocument(),
       reveal: () => this.revealDocument(),
       "export-pdf": () => this.exportPdf(),
+      preview: () => this.togglePreviewOnly(),
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
@@ -313,7 +334,15 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     const key = event.key.toLowerCase();
-    if (key === "q") {
+    if (key === "l" && !event.shiftKey) {
+      event.preventDefault();
+      if (!event.repeat) {
+        this.toggleOutlineNavigation();
+      }
+    } else if (key === "m" && !event.shiftKey) {
+      event.preventDefault();
+      this.togglePreviewOnly();
+    } else if (key === "q") {
       event.preventDefault();
       await backend.hideWindow();
     } else if (key === "s" && event.shiftKey) {
@@ -322,25 +351,25 @@ export class MarkdownQuickMemoApplication {
     } else if (key === "s") {
       event.preventDefault();
       await this.saveDocument(false);
-    } else if (key === "o" && event.shiftKey) {
-      event.preventDefault();
-      await this.toggleOpacity();
-    } else if (key === "o") {
+    } else if (key === "o" && !event.shiftKey) {
       event.preventDefault();
       await this.openDocument();
+    } else if (key === "h" && !event.shiftKey) {
+      event.preventDefault();
+      await this.toggleOpacity();
     } else if (key === "n") {
       event.preventDefault();
       await this.newDocument();
-    } else if (key === "r" && event.shiftKey) {
+    } else if (key === "r" && !event.shiftKey) {
       event.preventDefault();
       await this.renameDocument();
-    } else if (key === "e" && event.shiftKey) {
+    } else if (key === "e" && !event.shiftKey) {
       event.preventDefault();
       await this.revealDocument();
-    } else if (key === "p" && event.shiftKey) {
+    } else if (key === "p" && !event.shiftKey) {
       event.preventDefault();
       await this.exportPdf();
-    } else if (key === "x" && event.shiftKey) {
+    } else if (key === "x" && !event.shiftKey) {
       event.preventDefault();
       this.wrapSelection("~~");
     } else if (key === "b") {
@@ -376,6 +405,33 @@ export class MarkdownQuickMemoApplication {
     this.updateOutlineWidth(
       event.key === "ArrowLeft" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
     );
+  }
+
+  private handleOutlineNavigationShortcut(event: KeyboardEvent): void {
+    if (
+      !this.outlineNavigationActive ||
+      !event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      event.metaKey ||
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = Date.now();
+    if (
+      !event.repeat ||
+      !this.outlineNavigationHold ||
+      this.outlineNavigationHold.key !== event.key
+    ) {
+      this.outlineNavigationHold = { key: event.key, startedAt: now };
+    }
+    const elapsed = now - this.outlineNavigationHold.startedAt;
+    const distance = elapsed >= 1_200 ? 4 : elapsed >= 600 ? 2 : 1;
+    this.moveOutlineSelection(event.key === "ArrowDown" ? distance : -distance);
   }
 
   private async newDocument(): Promise<void> {
@@ -415,6 +471,7 @@ export class MarkdownQuickMemoApplication {
     if (this.saving) {
       return false;
     }
+    this.cancelAutoSave();
     let requestedPath: string | undefined;
     if (saveAs || !this.currentPath) {
       const selected = await save({
@@ -422,6 +479,7 @@ export class MarkdownQuickMemoApplication {
         filters: [{ name: "Markdown", extensions: ["md"] }],
       });
       if (typeof selected !== "string") {
+        this.scheduleAutoSave();
         return false;
       }
       requestedPath = selected;
@@ -436,8 +494,11 @@ export class MarkdownQuickMemoApplication {
         requestedPath,
       );
       this.currentPath = result.path;
-      this.revision.acceptSavedRevision(result.revision);
+      const accepted = this.revision.acceptSavedRevision(result.revision);
       this.updateTitle();
+      if (!accepted && this.autoSaveTimer === undefined) {
+        this.scheduleAutoSave();
+      }
       return true;
     } catch (error) {
       await this.showError("保存できませんでした", error);
@@ -445,6 +506,36 @@ export class MarkdownQuickMemoApplication {
     } finally {
       this.saving = false;
     }
+  }
+
+  private scheduleAutoSave(): void {
+    this.cancelAutoSave();
+    if (!this.currentPath || !this.revision.dirty) {
+      return;
+    }
+    this.autoSaveTimer = window.setTimeout(() => {
+      this.autoSaveTimer = undefined;
+      void this.autoSaveCurrentDocument();
+    }, AUTO_SAVE_DELAY_MS);
+  }
+
+  private cancelAutoSave(): void {
+    if (this.autoSaveTimer === undefined) {
+      return;
+    }
+    window.clearTimeout(this.autoSaveTimer);
+    this.autoSaveTimer = undefined;
+  }
+
+  private async autoSaveCurrentDocument(): Promise<void> {
+    if (!this.currentPath || !this.revision.dirty) {
+      return;
+    }
+    if (this.saving) {
+      this.scheduleAutoSave();
+      return;
+    }
+    await this.saveDocument(false);
   }
 
   private async renameDocument(): Promise<void> {
@@ -508,12 +599,11 @@ export class MarkdownQuickMemoApplication {
         printRoot,
         backend.localImageData,
       );
-      const completion = await nextBackendPayload<PdfExportCompleted>(
+      const result = await invokeWithBackendPayload<PdfExportCompleted>(
         "pdf-export-completed",
         60_000,
+        () => backend.exportPdf(target.path),
       );
-      await backend.exportPdf(target.path);
-      const result = await completion;
       if (!result.success) {
         throw new Error(result.error ?? "PDF出力に失敗しました。");
       }
@@ -571,6 +661,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private setDocument(content: string, path: string | null): void {
+    this.cancelAutoSave();
     this.suppressChanges = true;
     replaceDocument(this.editor, content);
     this.suppressChanges = false;
@@ -621,6 +712,11 @@ export class MarkdownQuickMemoApplication {
     const hasOutline = headings.length > 0;
     this.outline.hidden = !hasOutline;
     this.workspace.classList.toggle("has-outline", hasOutline);
+    if (!hasOutline && this.outlineNavigationActive) {
+      this.stopOutlineNavigation();
+    } else if (hasOutline && this.outlineNavigationActive) {
+      this.refreshOutlineNavigationSelection();
+    }
   }
 
   private renderOutlineNodes(nodes: readonly OutlineNode[]): HTMLElement[] {
@@ -658,6 +754,7 @@ export class MarkdownQuickMemoApplication {
       button.className = "outline-item";
       button.textContent = node.label;
       button.dataset.headingPosition = String(node.position);
+      button.dataset.outlineKey = node.key;
       button.title = node.label;
       row.append(button);
       container.append(row);
@@ -695,6 +792,110 @@ export class MarkdownQuickMemoApplication {
     } else {
       this.collapsedOutlineKeys.delete(key);
     }
+    if (this.outlineNavigationActive) {
+      this.refreshOutlineNavigationSelection();
+    }
+  }
+
+  private toggleOutlineNavigation(): void {
+    if (this.outlineNavigationActive) {
+      this.stopOutlineNavigation();
+      return;
+    }
+    const [first] = this.visibleOutlineButtons();
+    if (!first) {
+      return;
+    }
+    this.outlineNavigationActive = true;
+    this.outline.classList.add("outline-navigation-active");
+    this.selectOutlineButton(first, true);
+  }
+
+  private stopOutlineNavigation(): void {
+    this.outlineNavigationActive = false;
+    this.selectedOutlineKey = null;
+    this.outline.classList.remove("outline-navigation-active");
+    this.resetOutlineNavigationHold();
+    this.applyOutlineSelectionState();
+    this.editor.focus();
+  }
+
+  private moveOutlineSelection(offset: number): void {
+    const buttons = this.visibleOutlineButtons();
+    if (buttons.length === 0) {
+      this.stopOutlineNavigation();
+      return;
+    }
+    const selectedIndex = buttons.findIndex(
+      (button) => button.dataset.outlineKey === this.selectedOutlineKey,
+    );
+    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const nextIndex = Math.min(
+      buttons.length - 1,
+      Math.max(0, currentIndex + offset),
+    );
+    this.selectOutlineButton(buttons[nextIndex]!, true);
+  }
+
+  private refreshOutlineNavigationSelection(): void {
+    const buttons = this.visibleOutlineButtons();
+    const selected = buttons.find(
+      (button) => button.dataset.outlineKey === this.selectedOutlineKey,
+    );
+    this.selectedOutlineKey = (selected ?? buttons[0])?.dataset.outlineKey ?? null;
+    this.applyOutlineSelectionState();
+  }
+
+  private selectOutlineButton(
+    button: HTMLButtonElement,
+    navigate: boolean,
+  ): void {
+    this.selectedOutlineKey = button.dataset.outlineKey ?? null;
+    this.applyOutlineSelectionState();
+    if (typeof button.scrollIntoView === "function") {
+      button.scrollIntoView({ block: "nearest" });
+    }
+    if (navigate) {
+      navigateToHeading(
+        this.editor,
+        Number(button.dataset.headingPosition),
+      );
+    }
+  }
+
+  private applyOutlineSelectionState(): void {
+    for (const button of this.outlineList.querySelectorAll<HTMLButtonElement>(
+      ".outline-item",
+    )) {
+      const selected =
+        this.outlineNavigationActive &&
+        button.dataset.outlineKey === this.selectedOutlineKey;
+      button.classList.toggle("outline-item-selected", selected);
+      if (selected) {
+        button.setAttribute("aria-current", "location");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    }
+  }
+
+  private visibleOutlineButtons(): HTMLButtonElement[] {
+    return Array.from(
+      this.outlineList.querySelectorAll<HTMLButtonElement>(".outline-item"),
+    ).filter((button) => {
+      let ancestor = button.parentElement;
+      while (ancestor && ancestor !== this.outlineList) {
+        if (ancestor.hidden) {
+          return false;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
+  }
+
+  private resetOutlineNavigationHold(): void {
+    this.outlineNavigationHold = null;
   }
 
   private updateOutlineWidth(delta: number): void {
@@ -820,6 +1021,22 @@ export class MarkdownQuickMemoApplication {
     } catch (error) {
       await this.showError("半透明表示を切り替えられませんでした", error);
     }
+  }
+
+  private togglePreviewOnly(): void {
+    const enabled = !this.editor.state.readOnly;
+    setPreviewOnly(this.editor, enabled);
+    const button = this.required<HTMLButtonElement>(
+      "button[data-action='preview']",
+    );
+    button.textContent = enabled ? "編集モードへ戻る" : "閲覧モード";
+    button.setAttribute("aria-pressed", String(enabled));
+    button.classList.toggle("mode-toggle-active", enabled);
+    this.editorHost.setAttribute(
+      "aria-label",
+      enabled ? "Markdown閲覧欄" : "Markdown編集欄",
+    );
+    this.editor.focus();
   }
 
   private async showSettings(): Promise<void> {

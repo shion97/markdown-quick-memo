@@ -11,6 +11,7 @@ import {
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { tableRowRanges } from "./decorations";
 
 interface Continuation {
   replacementFrom?: number;
@@ -18,9 +19,19 @@ interface Continuation {
   inserted: string;
 }
 
+interface TextChange {
+  replacementFrom: number;
+  replacementTo: number;
+  inserted: string;
+}
+
 const LIST_PATTERN =
   /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/;
 const QUOTE_PATTERN = /^((?:[ \t]*>[ \t]?)+)(.*)$/;
+
+function reducedQuotePrefix(prefix: string): string {
+  return prefix.slice(0, prefix.lastIndexOf(">"));
+}
 
 export function continuationForLine(
   lineText: string,
@@ -57,7 +68,7 @@ export function continuationForLine(
       return {
         replacementFrom: 0,
         replacementTo: beforeCursor.length,
-        inserted: "\n",
+        inserted: reducedQuotePrefix(prefix),
       };
     }
     return { inserted: `\n${prefix}` };
@@ -65,6 +76,28 @@ export function continuationForLine(
 
   const indentation = /^\s*/.exec(beforeCursor)?.[0] ?? "";
   return { inserted: `\n${indentation}` };
+}
+
+export function quoteSpaceDeletionForLine(
+  lineText: string,
+  cursorOffset: number,
+): TextChange | null {
+  const beforeCursor = lineText.slice(0, cursorOffset);
+  const afterCursor = lineText.slice(cursorOffset);
+  const quote = QUOTE_PATTERN.exec(beforeCursor);
+  if (
+    !quote ||
+    (quote[2] ?? "") !== "" ||
+    !beforeCursor.endsWith(" ") ||
+    afterCursor.trim() !== ""
+  ) {
+    return null;
+  }
+  return {
+    replacementFrom: cursorOffset - 1,
+    replacementTo: cursorOffset,
+    inserted: "",
+  };
 }
 
 function inCodeBlock(view: EditorView, position: number): boolean {
@@ -111,6 +144,30 @@ function insertPlainLineBreak(view: EditorView): boolean {
   return true;
 }
 
+function deleteQuoteSpace(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty || inCodeBlock(view, selection.head)) {
+    return false;
+  }
+  const line = view.state.doc.lineAt(selection.head);
+  const cursorOffset = selection.head - line.from;
+  const deletion = quoteSpaceDeletionForLine(line.text, cursorOffset);
+  if (!deletion) {
+    return false;
+  }
+  const from = line.from + deletion.replacementFrom;
+  view.dispatch({
+    changes: {
+      from,
+      to: line.from + deletion.replacementTo,
+      insert: deletion.inserted,
+    },
+    selection: { anchor: from },
+    userEvent: "delete.backward",
+  });
+  return true;
+}
+
 function indentList(view: EditorView, remove: boolean): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);
   const list = LIST_PATTERN.exec(line.text);
@@ -147,16 +204,81 @@ function handleTab(view: EditorView, remove: boolean): boolean {
   return true;
 }
 
-function pairInputHandler(
+function insideTable(view: EditorView, position: number): boolean {
+  let node = syntaxTree(view.state).resolveInner(position, 1);
+  while (true) {
+    if (node.name === "Table") {
+      return true;
+    }
+    const parent = node.parent;
+    if (!parent) {
+      return false;
+    }
+    node = parent;
+  }
+}
+
+function moveAcrossTableCellBoundary(
+  view: EditorView,
+  direction: "backward" | "forward",
+): boolean {
+  const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.head);
+  if (
+    view.state.selection.ranges.length !== 1 ||
+    !selection.empty ||
+    !insideTable(view, line.from)
+  ) {
+    return false;
+  }
+  const cells = tableRowRanges(line).cells;
+  const cellIndex = cells.findIndex(
+    (cell) => selection.head >= cell.from && selection.head <= cell.to,
+  );
+  const currentCell = cellIndex >= 0 ? cells[cellIndex] : undefined;
+  const target = currentCell
+    ? direction === "forward" && selection.head === currentCell.to
+      ? cells[cellIndex + 1]?.from
+      : direction === "backward" && selection.head === currentCell.from
+        ? cells[cellIndex - 1]?.to
+        : undefined
+    : direction === "forward" && selection.head < (cells[0]?.from ?? 0)
+      ? cells[0]?.from
+      : direction === "backward" &&
+          selection.head > (cells[cells.length - 1]?.to ?? line.to)
+        ? cells[cells.length - 1]?.to
+        : undefined;
+  if (target === undefined) {
+    return false;
+  }
+  view.dispatch({
+    selection: { anchor: target },
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
+function moveCursorBackward(view: EditorView): boolean {
+  return (
+    moveAcrossTableCellBoundary(view, "backward") ||
+    cursorCharBackwardLogical(view)
+  );
+}
+
+function moveCursorForward(view: EditorView): boolean {
+  return (
+    moveAcrossTableCellBoundary(view, "forward") ||
+    cursorCharForwardLogical(view)
+  );
+}
+
+export function createPairInputHandler(): (
   view: EditorView,
   from: number,
   to: number,
   text: string,
-): boolean {
-  if (view.composing) {
-    return false;
-  }
-
+) => boolean {
   const pairs: Record<string, string> = {
     "(": ")",
     "[": "]",
@@ -165,49 +287,74 @@ function pairInputHandler(
     "'": "'",
     "`": "`",
   };
-  const closing = pairs[text];
-  if (!closing) {
-    return false;
-  }
+  let pendingClosing: { character: string; position: number } | undefined;
+  let skippedClosingCharacter: string | undefined;
 
-  if (text === "`" && view.state.doc.sliceString(Math.max(0, from - 2), from) === "``") {
+  return (view, from, to, text) => {
+    const expectedClosing = pendingClosing;
+    const previouslySkippedClosing = skippedClosingCharacter;
+    pendingClosing = undefined;
+    skippedClosingCharacter = undefined;
+    if (view.composing) {
+      return false;
+    }
+    if (
+      text === "`" &&
+      view.state.doc.sliceString(Math.max(0, from - 2), from) === "``"
+    ) {
+      view.dispatch({
+        changes: { from, to, insert: "`\n\n```" },
+        selection: { anchor: from + 2 },
+        userEvent: "input",
+      });
+      return true;
+    }
+    if (text === previouslySkippedClosing) {
+      return false;
+    }
+    if (
+      expectedClosing &&
+      text === expectedClosing.character &&
+      from === to &&
+      from === expectedClosing.position &&
+      view.state.doc.sliceString(from, from + 1) === expectedClosing.character
+    ) {
+      view.dispatch({ selection: { anchor: from + 1 } });
+      skippedClosingCharacter = text;
+      return true;
+    }
+
+    const closing = pairs[text];
+    if (!closing) {
+      return false;
+    }
+
+    const selection = view.state.selection.main;
+    if (!selection.empty) {
+      const selected = view.state.doc.sliceString(selection.from, selection.to);
+      view.dispatch({
+        changes: {
+          from: selection.from,
+          to: selection.to,
+          insert: `${text}${selected}${closing}`,
+        },
+        selection: EditorSelection.range(
+          selection.from + 1,
+          selection.to + 1,
+        ),
+        userEvent: "input",
+      });
+      return true;
+    }
+
     view.dispatch({
-      changes: { from, to, insert: "`\n\n```" },
-      selection: { anchor: from + 2 },
+      changes: { from, to, insert: `${text}${closing}` },
+      selection: { anchor: from + 1 },
       userEvent: "input",
     });
+    pendingClosing = { character: closing, position: from + 1 };
     return true;
-  }
-
-  const selection = view.state.selection.main;
-  if (!selection.empty) {
-    const selected = view.state.doc.sliceString(selection.from, selection.to);
-    view.dispatch({
-      changes: {
-        from: selection.from,
-        to: selection.to,
-        insert: `${text}${selected}${closing}`,
-      },
-      selection: EditorSelection.range(
-        selection.from + 1,
-        selection.to + 1,
-      ),
-      userEvent: "input",
-    });
-    return true;
-  }
-
-  const next = view.state.doc.sliceString(from, from + 1);
-  if (next === closing && text === closing) {
-    view.dispatch({ selection: { anchor: from + 1 } });
-    return true;
-  }
-  view.dispatch({
-    changes: { from, to, insert: `${text}${closing}` },
-    selection: { anchor: from + 1 },
-    userEvent: "input",
-  });
-  return true;
+  };
 }
 
 export function markdownInputAssistance(): Extension {
@@ -215,11 +362,12 @@ export function markdownInputAssistance(): Extension {
     Prec.highest(
       keymap.of([
         { key: "Enter", run: insertContinuation },
+        { key: "Backspace", run: deleteQuoteSpace },
         { key: "Shift-Enter", run: insertPlainLineBreak },
         { key: "Tab", run: (view) => handleTab(view, false) },
         { key: "Shift-Tab", run: (view) => handleTab(view, true) },
-        { key: "ArrowLeft", run: cursorCharBackwardLogical },
-        { key: "ArrowRight", run: cursorCharForwardLogical },
+        { key: "ArrowLeft", run: moveCursorBackward },
+        { key: "ArrowRight", run: moveCursorForward },
         { key: "ArrowUp", run: cursorLineUp },
         { key: "ArrowDown", run: cursorLineDown },
         { key: "Shift-ArrowLeft", run: selectCharBackwardLogical },
@@ -228,6 +376,6 @@ export function markdownInputAssistance(): Extension {
         { key: "Shift-ArrowDown", run: selectLineDown },
       ]),
     ),
-    EditorView.inputHandler.of(pairInputHandler),
+    EditorView.inputHandler.of(createPairInputHandler()),
   ];
 }

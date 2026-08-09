@@ -3,12 +3,18 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import {
   closeSearchPanel,
+  getSearchQuery,
   openSearchPanel,
   search,
   searchKeymap,
   searchPanelOpen,
 } from "@codemirror/search";
-import { EditorState, Prec, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  Prec,
+  type Extension,
+} from "@codemirror/state";
 import {
   drawSelection,
   dropCursor,
@@ -31,7 +37,13 @@ export interface EditorCallbacks {
   onControlClick: (position: number) => void;
 }
 
-const editorExtensions = new WeakMap<EditorView, readonly Extension[]>();
+interface EditorRuntime {
+  readonly extensions: readonly Extension[];
+  readonly previewOnly: Compartment;
+}
+
+const editorRuntimes = new WeakMap<EditorView, EditorRuntime>();
+const queuedSearchStatusUpdates = new WeakSet<EditorView>();
 
 const japaneseSearchPhrases: Record<string, string> = {
   Find: "検索",
@@ -53,6 +65,68 @@ function toggleSearchPanel(view: EditorView): boolean {
   return searchPanelOpen(view.state)
     ? closeSearchPanel(view)
     : openSearchPanel(view);
+}
+
+export function searchMatchStatus(state: EditorState): {
+  current: number;
+  total: number;
+} {
+  const query = getSearchQuery(state);
+  if (!query.valid || query.search.length === 0) {
+    return { current: 0, total: 0 };
+  }
+
+  const matches: { from: number; to: number }[] = [];
+  const cursor = query.getCursor(state);
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    matches.push(result.value);
+  }
+  if (matches.length === 0) {
+    return { current: 0, total: 0 };
+  }
+
+  const selection = state.selection.main;
+  let currentIndex = matches.findIndex(
+    (match) => match.from === selection.from && match.to === selection.to,
+  );
+  if (currentIndex < 0) {
+    currentIndex = matches.findIndex((match) => match.from >= selection.head);
+  }
+  return {
+    current: (currentIndex < 0 ? 0 : currentIndex) + 1,
+    total: matches.length,
+  };
+}
+
+function renderSearchMatchStatus(view: EditorView): void {
+  const panel = view.dom.querySelector<HTMLElement>(".cm-panel.cm-search");
+  if (!panel) {
+    return;
+  }
+  let status = panel.querySelector<HTMLElement>(".mqm-search-match-status");
+  if (!status) {
+    status = document.createElement("span");
+    status.className = "mqm-search-match-status";
+    status.setAttribute("aria-live", "polite");
+    status.setAttribute("aria-label", "検索結果の位置");
+    const searchInput = panel.querySelector<HTMLInputElement>(
+      "input[name='search']",
+    );
+    searchInput?.insertAdjacentElement("afterend", status);
+  }
+  const result = searchMatchStatus(view.state);
+  status.textContent = `${result.current} / ${result.total} 件`;
+}
+
+function queueSearchMatchStatusUpdate(view: EditorView): void {
+  if (queuedSearchStatusUpdates.has(view)) {
+    return;
+  }
+  queuedSearchStatusUpdates.add(view);
+  window.queueMicrotask(() => {
+    queuedSearchStatusUpdates.delete(view);
+    renderSearchMatchStatus(view);
+  });
 }
 
 function editorTheme(): Extension {
@@ -88,6 +162,15 @@ function editorTheme(): Extension {
   });
 }
 
+function previewOnlyExtensions(enabled: boolean): Extension {
+  return [
+    EditorState.readOnly.of(enabled),
+    EditorState.transactionFilter.of((transaction) =>
+      enabled && transaction.docChanged ? [] : transaction,
+    ),
+  ];
+}
+
 function countWords(content: string): number {
   const latinWords = content.match(/[A-Za-z0-9_]+/g)?.length ?? 0;
   const japaneseRuns =
@@ -109,6 +192,7 @@ export function createEditor(
 ): EditorView {
   let countTimer: number | undefined;
   let cancelOutlineRefresh: (() => void) | undefined;
+  const previewOnly = new Compartment();
   const extensions: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -138,6 +222,9 @@ export function createEditor(
     EditorView.lineWrapping,
     scrollPastEnd(),
     EditorView.updateListener.of((update) => {
+      if (searchPanelOpen(update.state)) {
+        queueSearchMatchStatusUpdate(update.view);
+      }
       if (update.docChanged || update.selectionSet) {
         const head = update.state.selection.main.head;
         const line = update.state.doc.lineAt(head);
@@ -180,17 +267,39 @@ export function createEditor(
   ];
   const state = EditorState.create({
     doc: "",
-    extensions,
+    extensions: [...extensions, previewOnly.of(previewOnlyExtensions(false))],
   });
   const view = new EditorView({ state, parent });
-  editorExtensions.set(view, extensions);
+  editorRuntimes.set(view, { extensions, previewOnly });
   return view;
 }
 
+export function setPreviewOnly(view: EditorView, enabled: boolean): void {
+  const runtime = editorRuntimes.get(view);
+  if (!runtime) {
+    throw new Error("エディター設定を変更できません。");
+  }
+  if (view.state.readOnly === enabled) {
+    return;
+  }
+  view.dispatch({
+    effects: runtime.previewOnly.reconfigure(previewOnlyExtensions(enabled)),
+  });
+}
+
 export function replaceDocument(view: EditorView, content: string): void {
-  const extensions = editorExtensions.get(view);
-  if (!extensions) {
+  const runtime = editorRuntimes.get(view);
+  if (!runtime) {
     throw new Error("エディター設定を復元できません。");
   }
-  view.setState(EditorState.create({ doc: content, extensions }));
+  const previewOnly = view.state.readOnly;
+  view.setState(
+    EditorState.create({
+      doc: content,
+      extensions: [
+        ...runtime.extensions,
+        runtime.previewOnly.of(previewOnlyExtensions(previewOnly)),
+      ],
+    }),
+  );
 }

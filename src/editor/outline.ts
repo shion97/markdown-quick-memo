@@ -105,7 +105,7 @@ export function navigateToHeading(
 ): void {
   view.dispatch({
     selection: { anchor: position },
-    effects: EditorView.scrollIntoView(position, { y: "start" }),
+    effects: EditorView.scrollIntoView(position, { y: "center" }),
   });
   view.focus();
 }

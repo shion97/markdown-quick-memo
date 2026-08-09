@@ -108,7 +108,7 @@ const mathPlugin: PluginSimple = (markdown) => {
     try {
       return `<div class="print-math-display">${renderMath(expression, true)}</div>`;
     } catch {
-      return `<pre>${markdown.utils.escapeHtml(`$$${expression}$$`)}</pre>`;
+      return `<div class="print-math-fallback">${markdown.utils.escapeHtml(`$$${expression}$$`)}</div>`;
     }
   };
 };
@@ -119,6 +119,82 @@ const renderer = new MarkdownIt({
   breaks: false,
   typographer: false,
 }).use(mathPlugin);
+
+function firstTextNode(
+  element: HTMLElement,
+): ReturnType<typeof document.createTextNode> | null {
+  const walker = document.createTreeWalker(
+    element,
+    globalThis.NodeFilter.SHOW_TEXT,
+  );
+  return walker.nextNode() as ReturnType<typeof document.createTextNode> | null;
+}
+
+function decoratePrintMarkup(target: HTMLElement): void {
+  for (const heading of target.querySelectorAll<HTMLElement>(
+    "h1, h2, h3, h4, h5, h6",
+  )) {
+    heading.classList.add(
+      "mqm-heading",
+      `mqm-heading-${heading.tagName.slice(1)}`,
+    );
+  }
+  for (const inlineCode of target.querySelectorAll<HTMLElement>(
+    "code:not(pre code)",
+  )) {
+    inlineCode.classList.add("mqm-inline-code");
+  }
+  for (const codeBlock of target.querySelectorAll<HTMLElement>(
+    "pre:not(.print-math-fallback)",
+  )) {
+    codeBlock.classList.add("mqm-print-code-block");
+    const code = codeBlock.querySelector<HTMLElement>("code");
+    const languageClass = Array.from(code?.classList ?? []).find((className) =>
+      className.startsWith("language-"),
+    );
+    const language = languageClass?.slice("language-".length);
+    if (language) {
+      const label = document.createElement("span");
+      label.className = "mqm-code-language mqm-print-code-language";
+      label.textContent = language;
+      label.setAttribute("aria-label", `コード言語: ${language}`);
+      codeBlock.prepend(label);
+    }
+  }
+  for (const quote of target.querySelectorAll<HTMLElement>("blockquote")) {
+    quote.classList.add("mqm-print-quote");
+  }
+  for (const table of target.querySelectorAll<HTMLElement>("table")) {
+    table.classList.add("mqm-table");
+  }
+  for (const rule of target.querySelectorAll<HTMLElement>("hr")) {
+    rule.classList.add("mqm-horizontal-rule");
+  }
+  for (const list of target.querySelectorAll<HTMLElement>("ul, ol")) {
+    list.classList.add("mqm-print-list");
+  }
+  for (const listItem of target.querySelectorAll<HTMLElement>("li")) {
+    listItem.classList.add("mqm-print-list-item");
+    const textNode = firstTextNode(listItem);
+    const checkbox = /^\[([ xX])\][ \t]+/.exec(textNode?.data ?? "");
+    if (!textNode || !checkbox) {
+      continue;
+    }
+    const checked = checkbox[1]?.toLowerCase() === "x";
+    textNode.data = textNode.data.slice(checkbox[0].length);
+    const checkboxElement = document.createElement("span");
+    checkboxElement.className = checked
+      ? "mqm-checkbox mqm-checkbox-checked"
+      : "mqm-checkbox";
+    checkboxElement.textContent = checked ? "✓" : "";
+    checkboxElement.setAttribute(
+      "aria-label",
+      checked ? "チェック済み" : "未チェック",
+    );
+    textNode.parentNode?.insertBefore(checkboxElement, textNode);
+    listItem.classList.add("mqm-print-task-item");
+  }
+}
 
 function imageLoaded(image: HTMLImageElement): Promise<void> {
   if (image.complete) {
@@ -135,37 +211,44 @@ export async function preparePrintDocument(
   target: HTMLElement,
   resolveLocalImage: (path: string) => Promise<string>,
 ): Promise<void> {
-  target.innerHTML = renderer.render(markdown);
-  const images = [...target.querySelectorAll<HTMLImageElement>("img")];
-  await Promise.all(
-    images.map(async (image) => {
-      const source = image.getAttribute("src") ?? "";
-      if (/^https?:\/\//i.test(source)) {
-        const replacement = document.createElement("span");
-        replacement.className = "print-image-blocked";
-        replacement.textContent = `外部画像（取得しません）: ${image.alt || source}`;
-        image.replaceWith(replacement);
-        return;
-      }
-      try {
-        image.src = await resolveLocalImage(source);
-        await imageLoaded(image);
-      } catch {
-        const replacement = document.createElement("span");
-        replacement.className = "print-image-missing";
-        replacement.textContent = `画像を読み込めません: ${image.alt || source}`;
-        image.replaceWith(replacement);
-      }
-    }),
-  );
-  if (document.fonts) {
-    await document.fonts.ready;
-  }
-  if (typeof window.requestAnimationFrame === "function") {
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve());
+  target.classList.add("print-root-preparing");
+  try {
+    target.innerHTML = renderer.render(markdown);
+    decoratePrintMarkup(target);
+    const images = [...target.querySelectorAll<HTMLImageElement>("img")];
+    await Promise.all(
+      images.map(async (image) => {
+        const source = image.getAttribute("src") ?? "";
+        if (/^https?:\/\//i.test(source)) {
+          const replacement = document.createElement("span");
+          replacement.className = "print-image-blocked";
+          replacement.textContent = `外部画像（取得しません）: ${image.alt || source}`;
+          image.replaceWith(replacement);
+          return;
+        }
+        try {
+          image.src = await resolveLocalImage(source);
+          await imageLoaded(image);
+        } catch {
+          const replacement = document.createElement("span");
+          replacement.className = "print-image-missing";
+          replacement.textContent = `画像を読み込めません: ${image.alt || source}`;
+          image.replaceWith(replacement);
+        }
+      }),
+    );
+    target.getBoundingClientRect();
+    if (document.fonts) {
+      await document.fonts.ready;
+    }
+    if (typeof window.requestAnimationFrame === "function") {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
       });
-    });
+    }
+  } finally {
+    target.classList.remove("print-root-preparing");
   }
 }

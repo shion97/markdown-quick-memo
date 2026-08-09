@@ -129,6 +129,18 @@ button.primary:hover {
   letter-spacing: 2px;
 }
 
+.mode-toggle {
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mode-toggle-active {
+  color: white;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 .document-status {
   display: flex;
   gap: 6px;
@@ -273,6 +285,15 @@ button.primary:hover {
   color: var(--muted);
 }
 
+.editor-host .cm-panel.cm-search .mqm-search-match-status {
+  flex: 0 0 auto;
+  min-width: 5em;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .outline-panel {
   position: absolute;
   z-index: 8;
@@ -296,7 +317,8 @@ button.primary:hover {
 }
 
 .outline-panel:hover,
-.outline-panel:focus-within {
+.outline-panel:focus-within,
+.outline-panel.outline-navigation-active {
   transform: translateX(0);
 }
 
@@ -395,6 +417,12 @@ button.primary:hover {
   white-space: normal;
 }
 
+.outline-item-selected {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .mqm-math-inline {
   display: inline-block;
   padding: 0 0.12em;
@@ -462,6 +490,12 @@ button.primary:hover {
   background: var(--accent);
 }
 
+.mqm-link-text {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .mqm-horizontal-rule {
   width: 100%;
   height: 1px;
@@ -470,43 +504,106 @@ button.primary:hover {
 }
 
 .mqm-quote-line {
+  --mqm-quote-prefix-width: calc(
+    var(--mqm-quote-marker-width, 1em) + 0.25em
+  );
+  position: relative;
+  padding-left: var(--mqm-quote-prefix-width) !important;
   background: var(--surface-muted);
   color: color-mix(in srgb, var(--text) 80%, var(--muted));
+  overflow-wrap: anywhere !important;
+  text-indent: 0;
+  word-break: break-all !important;
+}
+
+.mqm-quote-line-active {
+  --mqm-quote-prefix-width: calc(
+    var(--mqm-quote-marker-width, 1em) +
+      var(--mqm-quote-source-width, 0ch)
+  );
+  text-indent: calc(0px - var(--mqm-quote-source-width, 0ch));
 }
 
 .mqm-quote-markers {
-  display: inline-flex;
-  height: 1.75em;
-  margin-right: 0.25em;
-  vertical-align: middle;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: stretch;
+  text-indent: 0;
   user-select: none;
 }
 
 .mqm-quote-marker {
-  display: inline-block;
+  position: relative;
+  display: block;
   width: 1em;
-  height: 100%;
   border-left: 4px solid color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
-.mqm-table {
-  width: 100%;
-  margin: 0.7em 0;
-  border-collapse: collapse;
-  font-size: 0.95em;
+.mqm-quote-marker-connect-before::before,
+.mqm-quote-marker-connect-after::after {
+  position: absolute;
+  left: -4px;
+  width: 4px;
+  height: 0.875em;
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+  content: "";
 }
 
-.mqm-table th,
-.mqm-table td {
+.mqm-quote-marker-connect-before::before {
+  top: -0.875em;
+}
+
+.mqm-quote-marker-connect-after::after {
+  bottom: -0.875em;
+}
+
+.mqm-table-row {
+  display: flex !important;
+  width: 100%;
+  padding: 0 !important;
+  font-size: 0.95em;
+  text-indent: 0;
+}
+
+.mqm-table-row-start {
+  margin-top: 0.7em;
+}
+
+.mqm-table-row-end {
+  margin-bottom: 0.7em;
+}
+
+.mqm-table-cell {
+  display: block;
+  flex-basis: 0;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 1.75em;
   padding: 0.48em 0.7em;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
-.mqm-table th {
+.mqm-table-cell-heading {
   color: var(--muted);
   background: var(--surface-muted);
   font-weight: 600;
+}
+
+.mqm-table-empty-cell {
+  box-sizing: border-box;
+}
+
+.mqm-decoration-source,
+.mqm-decoration-source-line {
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.9em;
 }
 
 .mqm-heading {
@@ -655,12 +752,24 @@ dialog::backdrop {
   display: none;
 }
 
+.print-root.print-root-preparing {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  display: block;
+  width: 176mm;
+  color: #111827;
+  opacity: 0;
+  pointer-events: none;
+}
+
 @media print {
   @page {
     size: A4;
     margin: 16mm 17mm 18mm;
   }
 
+  :root,
   html,
   body,
   #app {
@@ -679,66 +788,141 @@ dialog::backdrop {
   .print-root {
     display: block;
     color: #111827;
-    font: 10.5pt/1.65 "BIZ UDGothic", "Yu Gothic", sans-serif;
+    font: 12pt/1.75 "BIZ UDGothic", "Yu Gothic UI", "Segoe UI", sans-serif;
     overflow-wrap: anywhere;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
-  .print-root h1,
-  .print-root h2,
-  .print-root h3 {
+  .print-root p {
+    margin: 0 0 1.25em;
+  }
+
+  .print-root .mqm-heading {
+    margin: 0 0 0.75em;
+    padding: 0;
+    border: 0;
     break-after: avoid;
     line-height: 1.35;
+    text-decoration: none;
   }
 
-  .print-root h1 {
-    padding-bottom: 0.25em;
-    border-bottom: 2px solid #2859c5;
+  .print-root .mqm-heading-1 {
+    padding-top: 0.55em;
+    font-size: 1.72em;
   }
 
-  .print-root h2 {
-    padding-bottom: 0.2em;
-    border-bottom: 1px solid #cbd5e1;
+  .print-root .mqm-heading-2 {
+    padding-top: 0.4em;
+    font-size: 1.48em;
   }
 
-  .print-root pre,
-  .print-root blockquote,
-  .print-root table,
+  .print-root .mqm-heading-3 {
+    font-size: 1.28em;
+  }
+
+  .print-root .mqm-heading-4 {
+    font-size: 1.14em;
+  }
+
+  .print-root .mqm-print-code-block,
+  .print-root .mqm-print-quote,
+  .print-root .mqm-table,
   .print-math-display {
     break-inside: avoid;
   }
 
-  .print-root pre,
-  .print-root code {
+  .print-root .mqm-print-code-block,
+  .print-root .mqm-inline-code {
     font-family: "Cascadia Mono", "Consolas", monospace;
-    background: #f1f5f9;
+    background: #f3f5f8;
   }
 
-  .print-root pre {
-    padding: 0.8em 1em;
+  .print-root .mqm-inline-code {
+    padding: 0.12em 0.3em;
+    border-radius: 0.28em;
+    font-size: 0.9em;
+  }
+
+  .print-root .mqm-print-code-block {
+    margin: 0 0 1.25em;
+    padding: 0.55em 1em;
+    border-radius: 0.45em;
     white-space: pre-wrap;
   }
 
-  .print-root blockquote {
-    margin-left: 0;
-    padding-left: 1em;
-    border-left: 3px solid #94a3b8;
-    color: #475569;
+  .print-root .mqm-print-code-block code {
+    font: inherit;
+    background: transparent;
   }
 
-  .print-root table {
+  .print-root .mqm-print-code-language {
+    display: block;
+    margin-bottom: 0.25em;
+    color: #6d7480;
+    font-size: 0.78em;
+    font-style: italic;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .print-root .mqm-print-quote {
+    margin: 0 0 1.25em;
+    padding: 0.2em 0.75em;
+    border-left: 4px solid #9aafd9;
+    color: #4b5563;
+    background: #f3f5f8;
+  }
+
+  .print-root .mqm-print-quote > :last-child {
+    margin-bottom: 0;
+  }
+
+  .print-root .mqm-table {
     width: 100%;
+    margin: 0.7em 0 1.25em;
     border-collapse: collapse;
+    font-size: 0.95em;
   }
 
-  .print-root th,
-  .print-root td {
-    padding: 0.38em 0.55em;
-    border: 1px solid #cbd5e1;
+  .print-root .mqm-table th,
+  .print-root .mqm-table td {
+    padding: 0.48em 0.7em;
+    border: 0;
+    border-bottom: 1px solid #dfe3e8;
     text-align: left;
   }
 
-  .print-root th {
-    background: #f1f5f9;
+  .print-root .mqm-table th {
+    color: #6d7480;
+    background: #f3f5f8;
+    font-weight: 600;
+  }
+
+  .print-root .mqm-horizontal-rule {
+    width: 100%;
+    height: 1px;
+    margin: 0.85em 0 1.25em;
+    border: 0;
+    background: #dfe3e8;
+  }
+
+  .print-root .mqm-print-list {
+    margin-top: 0;
+    margin-bottom: 1.25em;
+    padding-left: 2.75em;
+  }
+
+  .print-root li::marker {
+    color: #2859c5;
+  }
+
+  .print-root .mqm-print-task-item {
+    list-style: none;
+  }
+
+  .print-root .mqm-checkbox {
+    margin-left: -1.4em;
   }
 
   .print-root img {
@@ -751,6 +935,16 @@ dialog::backdrop {
     margin: 1em 0;
     overflow: hidden;
     text-align: center;
+  }
+
+  .print-math-fallback {
+    margin: 1em 0;
+    padding: 0.4em 0.6em;
+    border: 1px dashed #94a3b8;
+    color: #64748b;
+    background: transparent;
+    font: 0.9em/1.5 "Cascadia Mono", "Consolas", monospace;
+    white-space: pre-wrap;
   }
 
   .print-image-blocked,

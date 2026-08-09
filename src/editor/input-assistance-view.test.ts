@@ -7,7 +7,10 @@ import { EditorView, keymap, runScopeHandlers } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { afterEach, describe, expect, it } from "vitest";
 import { markdownDecorations } from "./decorations";
-import { markdownInputAssistance } from "./input-assistance";
+import {
+  createPairInputHandler,
+  markdownInputAssistance,
+} from "./input-assistance";
 
 const views: EditorView[] = [];
 
@@ -41,6 +44,23 @@ function press(view: EditorView, key: string, shiftKey = false): boolean {
   );
 }
 
+function typeText(
+  view: EditorView,
+  handler: ReturnType<typeof createPairInputHandler>,
+  text: string,
+): boolean {
+  const selection = view.state.selection.main;
+  const handled = handler(view, selection.from, selection.to, text);
+  if (!handled) {
+    view.dispatch({
+      changes: { from: selection.from, to: selection.to, insert: text },
+      selection: { anchor: selection.from + text.length },
+      userEvent: "input",
+    });
+  }
+  return handled;
+}
+
 afterEach(() => {
   for (const view of views.splice(0)) {
     view.destroy();
@@ -49,6 +69,65 @@ afterEach(() => {
 });
 
 describe("markdownInputAssistanceの実キーバインド", () => {
+  it.each([
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ['"', '"'],
+    ["'", "'"],
+  ])("%sの補完直後に%sを入力すると一度だけ外側へ移動する", (open, close) => {
+    const view = createView("");
+    const handler = createPairInputHandler();
+
+    expect(typeText(view, handler, open)).toBe(true);
+    expect(view.state.doc.toString()).toBe(`${open}${close}`);
+    expect(view.state.selection.main.head).toBe(1);
+
+    expect(typeText(view, handler, close)).toBe(true);
+    expect(view.state.doc.toString()).toBe(`${open}${close}`);
+    expect(view.state.selection.main.head).toBe(2);
+
+    expect(typeText(view, handler, close)).toBe(false);
+    expect(view.state.doc.toString()).toBe(`${open}${close}${close}`);
+  });
+
+  it("補完後に別文字を入力すると閉じ記号を通常どおり挿入する", () => {
+    const view = createView("");
+    const handler = createPairInputHandler();
+
+    typeText(view, handler, "(");
+    expect(typeText(view, handler, "a")).toBe(false);
+    expect(typeText(view, handler, ")")).toBe(false);
+    expect(view.state.doc.toString()).toBe("(a))");
+  });
+
+  it("既存の閉じ記号は自動補完として扱わない", () => {
+    const view = createView(")", 0);
+    const handler = createPairInputHandler();
+
+    expect(typeText(view, handler, ")")).toBe(false);
+    expect(view.state.doc.toString()).toBe("))");
+    expect(view.state.selection.main.head).toBe(1);
+  });
+
+  it("バッククォートを3回入力するとコードブロックを作成する", () => {
+    const view = createView("");
+    const handler = createPairInputHandler();
+
+    expect(typeText(view, handler, "`")).toBe(true);
+    expect(view.state.doc.toString()).toBe("``");
+    expect(view.state.selection.main.head).toBe(1);
+
+    expect(typeText(view, handler, "`")).toBe(true);
+    expect(view.state.doc.toString()).toBe("``");
+    expect(view.state.selection.main.head).toBe(2);
+
+    expect(typeText(view, handler, "`")).toBe(true);
+
+    expect(view.state.doc.toString()).toBe("```\n\n```");
+    expect(view.state.selection.main.head).toBe(4);
+  });
+
   it("通常行のTabを本文と選択範囲を変えずに消費する", () => {
     const view = createView("本文", 1);
 
@@ -83,13 +162,9 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(view.state.selection.main.head).toBe(7);
   });
 
-  it("左右キーは各種Decorationをまたいでも論理位置を一文字ずつ移動する", () => {
+  it("左右キーは表以外のDecorationをまたいでも論理位置を一文字ずつ移動する", () => {
     const document = [
       "# Heading",
-      "",
-      "| A | B |",
-      "| --- | --- |",
-      "| 1 | 2 |",
       "",
       "$$x^2$$",
       "",
@@ -107,5 +182,38 @@ describe("markdownInputAssistanceの実キーバインド", () => {
       expect(press(view, "ArrowRight")).toBe(true);
       expect(view.state.selection.main.head).toBe(expected);
     }
+  });
+
+  it("左右キー1回で隣の表セルへ移動する", () => {
+    const document = "| 左 |  | 右 |\n| --- | --- | --- |";
+    const leftCellEnd = document.indexOf("左") + 1;
+    const emptyCell = document.indexOf("|  |") + 3;
+    const rightCellStart = document.indexOf("右");
+    const view = createView(document, leftCellEnd);
+
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(emptyCell);
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(rightCellStart);
+
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(emptyCell);
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(leftCellEnd);
+  });
+
+  it("左右キー1回で表端から最初と最後のセルへ移動する", () => {
+    const document = "| 左 | 中 | 右 |\n| --- | --- | --- |";
+    const firstCellStart = document.indexOf("左");
+    const lastCellEnd = document.indexOf("右") + 1;
+    const rightEdge = document.indexOf("\n");
+    const view = createView(document, 0);
+
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(firstCellStart);
+
+    view.dispatch({ selection: { anchor: rightEdge } });
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(lastCellEnd);
   });
 });
