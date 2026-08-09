@@ -165,12 +165,12 @@ export class MarkdownQuickMemoApplication {
             <section class="popover-group" aria-labelledby="shortcut-file-heading">
               <h2 id="shortcut-file-heading">ファイル</h2>
               <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
-              <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
+              <button data-action="open"><span>開く</span></button>
               <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
               <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
-              <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+Shift+R</kbd></button>
-              <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+Shift+E</kbd></button>
-              <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+Shift+P</kbd></button>
+              <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+R</kbd></button>
+              <button data-action="reveal"><span>保存先を開く</span><kbd>Ctrl+E</kbd></button>
+              <button data-action="export-pdf"><span>PDFへ書き出す</span><kbd>Ctrl+P</kbd></button>
             </section>
             <section class="popover-group" aria-labelledby="shortcut-edit-heading">
               <h2 id="shortcut-edit-heading">編集</h2>
@@ -178,7 +178,7 @@ export class MarkdownQuickMemoApplication {
               <div class="shortcut-row"><span>検索</span><kbd>Ctrl+F</kbd></div>
               <div class="shortcut-row"><span>表を挿入</span><kbd>Ctrl+T</kbd></div>
               <div class="shortcut-row"><span>太字 / 斜体</span><kbd>Ctrl+B / Ctrl+I</kbd></div>
-              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+Shift+X</kbd></div>
+              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+X</kbd></div>
               <div class="shortcut-row"><span>リストを深く / 浅く</span><kbd>Tab / Shift+Tab</kbd></div>
               <div class="shortcut-row"><span>単純改行</span><kbd>Shift+Enter</kbd></div>
               <div class="shortcut-row"><span>リンク・画像を開く</span><kbd>Ctrl+クリック</kbd></div>
@@ -186,8 +186,9 @@ export class MarkdownQuickMemoApplication {
             <section class="popover-group" aria-labelledby="shortcut-window-heading">
               <h2 id="shortcut-window-heading">表示・終了</h2>
               <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
-              <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+Shift+L</kbd></div>
-              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+Shift+O</kbd></button>
+              <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
+              <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
+              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+O</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
             </section>
@@ -333,11 +334,14 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     const key = event.key.toLowerCase();
-    if (key === "l" && event.shiftKey) {
+    if (key === "l" && !event.shiftKey) {
       event.preventDefault();
       if (!event.repeat) {
         this.toggleOutlineNavigation();
       }
+    } else if (key === "m" && !event.shiftKey) {
+      event.preventDefault();
+      this.togglePreviewOnly();
     } else if (key === "q") {
       event.preventDefault();
       await backend.hideWindow();
@@ -347,25 +351,22 @@ export class MarkdownQuickMemoApplication {
     } else if (key === "s") {
       event.preventDefault();
       await this.saveDocument(false);
-    } else if (key === "o" && event.shiftKey) {
+    } else if (key === "o" && !event.shiftKey) {
       event.preventDefault();
       await this.toggleOpacity();
-    } else if (key === "o") {
-      event.preventDefault();
-      await this.openDocument();
     } else if (key === "n") {
       event.preventDefault();
       await this.newDocument();
-    } else if (key === "r" && event.shiftKey) {
+    } else if (key === "r" && !event.shiftKey) {
       event.preventDefault();
       await this.renameDocument();
-    } else if (key === "e" && event.shiftKey) {
+    } else if (key === "e" && !event.shiftKey) {
       event.preventDefault();
       await this.revealDocument();
-    } else if (key === "p" && event.shiftKey) {
+    } else if (key === "p" && !event.shiftKey) {
       event.preventDefault();
       await this.exportPdf();
-    } else if (key === "x" && event.shiftKey) {
+    } else if (key === "x" && !event.shiftKey) {
       event.preventDefault();
       this.wrapSelection("~~");
     } else if (key === "b") {

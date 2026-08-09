@@ -79,29 +79,54 @@ describe("MarkdownQuickMemoApplication", () => {
       "rename",
       "reveal",
       "export-pdf",
+      "preview",
       "opacity",
       "hide",
       "exit",
       "settings",
     ]);
     expect(root.querySelector("#more-menu")?.textContent).toContain(
-      "Ctrl+Shift+P",
+      "Ctrl+P",
     );
     const shortcutText = root.querySelector("#more-menu")?.textContent ?? "";
     for (const shortcut of [
       "Ctrl+Alt+M",
+      "Ctrl+Shift+S",
+      "Ctrl+R",
+      "Ctrl+E",
+      "Ctrl+P",
       "Ctrl+Z / Ctrl+Y",
       "Ctrl+F",
       "Ctrl+T",
       "Ctrl+B / Ctrl+I",
-      "Ctrl+Shift+X",
+      "Ctrl+X",
       "Tab / Shift+Tab",
       "Shift+Enter",
       "Ctrl+クリック",
-      "Ctrl+Shift+L",
+      "Ctrl+L",
+      "Ctrl+M",
+      "Ctrl+O",
     ]) {
       expect(shortcutText).toContain(shortcut);
     }
+  });
+
+  it("Ctrl+Mで閲覧モードを切り替える", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "m",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(view.state.readOnly).toBe(true);
   });
 
   it("上部ボタンで閲覧モードを切り替え、本文変更だけを拒否する", () => {
@@ -212,7 +237,7 @@ describe("MarkdownQuickMemoApplication", () => {
     ).toBe(true);
   });
 
-  it("Ctrl+Shift+Lで目次操作を切り替え、Ctrlと上下キーで編集位置を移動する", () => {
+  it("Ctrl+Lで目次操作を切り替え、Ctrlと上下キーで編集位置を移動する", () => {
     vi.useFakeTimers();
     const root = document.createElement("div");
     document.body.append(root);
@@ -226,7 +251,6 @@ describe("MarkdownQuickMemoApplication", () => {
     const startEvent = new KeyboardEvent("keydown", {
       key: "l",
       ctrlKey: true,
-      shiftKey: true,
       bubbles: true,
       cancelable: true,
     });
@@ -245,7 +269,6 @@ describe("MarkdownQuickMemoApplication", () => {
       new KeyboardEvent("keydown", {
         key: "l",
         ctrlKey: true,
-        shiftKey: true,
         repeat: true,
         bubbles: true,
         cancelable: true,
@@ -289,7 +312,6 @@ describe("MarkdownQuickMemoApplication", () => {
       new KeyboardEvent("keydown", {
         key: "l",
         ctrlKey: true,
-        shiftKey: true,
         bubbles: true,
         cancelable: true,
       }),
@@ -315,7 +337,6 @@ describe("MarkdownQuickMemoApplication", () => {
       new KeyboardEvent("keydown", {
         key: "l",
         ctrlKey: true,
-        shiftKey: true,
         bubbles: true,
         cancelable: true,
       }),
@@ -353,7 +374,6 @@ describe("MarkdownQuickMemoApplication", () => {
       new KeyboardEvent("keydown", {
         key: "l",
         ctrlKey: true,
-        shiftKey: true,
         bubbles: true,
         cancelable: true,
       }),
@@ -399,7 +419,6 @@ describe("MarkdownQuickMemoApplication", () => {
       new KeyboardEvent("keydown", {
         key: "l",
         ctrlKey: true,
-        shiftKey: true,
         bubbles: true,
         cancelable: true,
       }),
