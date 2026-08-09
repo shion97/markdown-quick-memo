@@ -165,7 +165,7 @@ export class MarkdownQuickMemoApplication {
             <section class="popover-group" aria-labelledby="shortcut-file-heading">
               <h2 id="shortcut-file-heading">ファイル</h2>
               <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
-              <button data-action="open"><span>開く</span></button>
+              <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
               <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
               <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
               <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+R</kbd></button>
@@ -188,7 +188,7 @@ export class MarkdownQuickMemoApplication {
               <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
               <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
               <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
-              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+O</kbd></button>
+              <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+H</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
             </section>
@@ -352,6 +352,9 @@ export class MarkdownQuickMemoApplication {
       event.preventDefault();
       await this.saveDocument(false);
     } else if (key === "o" && !event.shiftKey) {
+      event.preventDefault();
+      await this.openDocument();
+    } else if (key === "h" && !event.shiftKey) {
       event.preventDefault();
       await this.toggleOpacity();
     } else if (key === "n") {

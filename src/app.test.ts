@@ -106,6 +106,7 @@ describe("MarkdownQuickMemoApplication", () => {
       "Ctrl+L",
       "Ctrl+M",
       "Ctrl+O",
+      "Ctrl+H",
     ]) {
       expect(shortcutText).toContain(shortcut);
     }
@@ -127,6 +128,27 @@ describe("MarkdownQuickMemoApplication", () => {
     );
 
     expect(view.state.readOnly).toBe(true);
+  });
+
+  it("Ctrl+Oでファイルを開き、Ctrl+Hで半透明表示を切り替える", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const handleShortcut = (
+      application as unknown as {
+        handleShortcut(event: KeyboardEvent): Promise<void>;
+      }
+    ).handleShortcut.bind(application);
+    dialogMocks.open.mockResolvedValue(null);
+    const setWindowOpacity = vi
+      .spyOn(backend, "setWindowOpacity")
+      .mockResolvedValue();
+
+    await handleShortcut(new KeyboardEvent("keydown", { key: "o", ctrlKey: true }));
+    expect(dialogMocks.open).toHaveBeenCalledOnce();
+
+    await handleShortcut(new KeyboardEvent("keydown", { key: "h", ctrlKey: true }));
+    expect(setWindowOpacity).toHaveBeenCalledWith(0.6);
   });
 
   it("上部ボタンで閲覧モードを切り替え、本文変更だけを拒否する", () => {

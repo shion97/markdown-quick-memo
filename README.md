@@ -55,7 +55,7 @@ pnpm tauri dev
 | --- | --- |
 | アプリを表示・再起動 | `Ctrl + Alt + M` |
 | 新規 | `Ctrl + N` |
-| 開く | 三点メニュー |
+| 開く | `Ctrl + O` |
 | 保存 | `Ctrl + S` |
 | 名前を付けて保存 | `Ctrl + Shift + S` |
 | ファイル名を変更 | `Ctrl + R` |
@@ -70,7 +70,7 @@ pnpm tauri dev
 | リストを深くする / 浅くする | `Tab` / `Shift + Tab` |
 | 構造を継続しない改行 | `Shift + Enter` |
 | 閲覧モード / 編集モード | `Ctrl + M` |
-| 半透明表示 | `Ctrl + O` |
+| 半透明表示 | `Ctrl + H` |
 | リンク・画像を開く | 対象を`Ctrl + クリック` |
 | 目次を広げる / 狭める | `Ctrl + ←` / `Ctrl + →` |
 | 目次操作を開始 / 終了 | `Ctrl + L` |
