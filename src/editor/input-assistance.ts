@@ -223,27 +223,30 @@ function moveAcrossTableCellBoundary(
   direction: "backward" | "forward",
 ): boolean {
   const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.head);
   if (
     view.state.selection.ranges.length !== 1 ||
     !selection.empty ||
-    !insideTable(view, selection.head)
+    !insideTable(view, line.from)
   ) {
     return false;
   }
-  const line = view.state.doc.lineAt(selection.head);
   const cells = tableRowRanges(line).cells;
   const cellIndex = cells.findIndex(
     (cell) => selection.head >= cell.from && selection.head <= cell.to,
   );
-  if (cellIndex < 0) {
-    return false;
-  }
-  const currentCell = cells[cellIndex];
-  const target =
-    direction === "forward" && selection.head === currentCell?.to
+  const currentCell = cellIndex >= 0 ? cells[cellIndex] : undefined;
+  const target = currentCell
+    ? direction === "forward" && selection.head === currentCell.to
       ? cells[cellIndex + 1]?.from
-      : direction === "backward" && selection.head === currentCell?.from
+      : direction === "backward" && selection.head === currentCell.from
         ? cells[cellIndex - 1]?.to
+        : undefined
+    : direction === "forward" && selection.head < (cells[0]?.from ?? 0)
+      ? cells[0]?.from
+      : direction === "backward" &&
+          selection.head > (cells[cells.length - 1]?.to ?? line.to)
+        ? cells[cells.length - 1]?.to
         : undefined;
   if (target === undefined) {
     return false;

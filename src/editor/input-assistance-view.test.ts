@@ -201,4 +201,19 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(press(view, "ArrowLeft")).toBe(true);
     expect(view.state.selection.main.head).toBe(leftCellEnd);
   });
+
+  it("左右キー1回で表端から最初と最後のセルへ移動する", () => {
+    const document = "| 左 | 中 | 右 |\n| --- | --- | --- |";
+    const firstCellStart = document.indexOf("左");
+    const lastCellEnd = document.indexOf("右") + 1;
+    const rightEdge = document.indexOf("\n");
+    const view = createView(document, 0);
+
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(firstCellStart);
+
+    view.dispatch({ selection: { anchor: rightEdge } });
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(lastCellEnd);
+  });
 });
