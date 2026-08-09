@@ -60,6 +60,7 @@ describe("MarkdownQuickMemoApplication", () => {
     const toolbar = root.querySelector(".toolbar");
     expect(toolbar?.querySelector("#cursor-position")).not.toBeNull();
     expect(toolbar?.querySelector("#status")).not.toBeNull();
+    expect(toolbar?.querySelector("button[data-action='preview']")).not.toBeNull();
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),
     ).toBeNull();
@@ -101,6 +102,38 @@ describe("MarkdownQuickMemoApplication", () => {
     ]) {
       expect(shortcutText).toContain(shortcut);
     }
+  });
+
+  it("上部ボタンで閲覧モードを切り替え、本文変更だけを拒否する", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "本文", null);
+    const editorElement = root.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+    const button = root.querySelector<HTMLButtonElement>(
+      "button[data-action='preview']",
+    )!;
+
+    button.click();
+    expect(view.state.readOnly).toBe(true);
+    expect(button.textContent).toBe("編集モードへ戻る");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(root.querySelector("#editor")?.getAttribute("aria-label")).toBe(
+      "Markdown閲覧欄",
+    );
+
+    view.dispatch({ changes: { from: 2, insert: "変更" } });
+    expect(view.state.doc.toString()).toBe("本文");
+    view.dispatch({ selection: { anchor: 0, head: 2 } });
+    expect(view.state.selection.main.to).toBe(2);
+
+    setApplicationDocument(application, "別文書", null);
+    expect(view.state.readOnly).toBe(true);
+    button.click();
+    expect(view.state.readOnly).toBe(false);
+    view.dispatch({ changes: { from: 3, insert: "を編集" } });
+    expect(view.state.doc.toString()).toBe("別文書を編集");
   });
 
   it("編集内容から目次を更新し、クリックした見出しへ移動する", () => {

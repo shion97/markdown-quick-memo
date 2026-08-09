@@ -129,6 +129,18 @@ button.primary:hover {
   letter-spacing: 2px;
 }
 
+.mode-toggle {
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mode-toggle-active {
+  color: white;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 .document-status {
   display: flex;
   gap: 6px;
@@ -548,24 +560,51 @@ button.primary:hover {
   bottom: -0.875em;
 }
 
-.mqm-table {
+.mqm-table-row {
+  display: grid !important;
+  grid-template-columns: repeat(
+    var(--mqm-table-columns),
+    minmax(0, 1fr)
+  );
   width: 100%;
-  margin: 0.7em 0;
-  border-collapse: collapse;
+  padding: 0 !important;
   font-size: 0.95em;
+  text-indent: 0;
 }
 
-.mqm-table th,
-.mqm-table td {
+.mqm-table-row-start {
+  margin-top: 0.7em;
+}
+
+.mqm-table-row-end {
+  margin-bottom: 0.7em;
+}
+
+.mqm-table-cell {
+  display: block;
+  min-width: 0;
+  min-height: 1.75em;
   padding: 0.48em 0.7em;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
-.mqm-table th {
+.mqm-table-cell-heading {
   color: var(--muted);
   background: var(--surface-muted);
   font-weight: 600;
+}
+
+.mqm-table-empty-cell {
+  box-sizing: border-box;
+}
+
+.mqm-decoration-source,
+.mqm-decoration-source-line {
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.9em;
 }
 
 .mqm-heading {

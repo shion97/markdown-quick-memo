@@ -23,18 +23,24 @@ function loadApplicationStyles(): void {
   }
 }
 
-function renderDocument(source: string, cursor = source.length): HTMLElement {
+function renderDocument(
+  source: string,
+  selection: number | { anchor: number; head: number } = source.length,
+  readOnly = false,
+): HTMLElement {
   const parent = document.createElement("div");
   document.body.append(parent);
   const state = EditorState.create({
     doc: source,
-    selection: { anchor: cursor },
+    selection:
+      typeof selection === "number" ? { anchor: selection } : selection,
     extensions: [
       markdown({
         base: markdownLanguage,
         extensions: [GFM],
       }),
       markdownDecorations,
+      EditorState.readOnly.of(readOnly),
       EditorView.lineWrapping,
     ],
   });
@@ -79,9 +85,12 @@ describe("markdownDecorations", () => {
     const parent = renderDocument(source);
 
     expect(parent.querySelector(".mqm-math-display .katex")).not.toBeNull();
-    expect(parent.querySelector("table.mqm-table")).not.toBeNull();
+    expect(parent.querySelectorAll(".mqm-table-row")).toHaveLength(2);
+    for (const row of parent.querySelectorAll(".mqm-table-row")) {
+      expect(row.querySelectorAll(":scope > .mqm-table-cell")).toHaveLength(2);
+    }
     expect(
-      parent.querySelector("table.mqm-table .mqm-inline-code")?.textContent,
+      parent.querySelector(".mqm-table-row .mqm-inline-code")?.textContent,
     ).toBe("code");
     expect(parent.querySelector(".mqm-horizontal-rule")).not.toBeNull();
     expect(parent.querySelectorAll(".mqm-checkbox")).toHaveLength(2);
@@ -123,12 +132,80 @@ describe("markdownDecorations", () => {
     expect(view?.state.doc.toString()).toBe(source);
   });
 
-  it("選択中のMarkdownリンクは原文へ戻す", () => {
+  it("選択中のMarkdownリンクは装飾を維持して原文を表示する", () => {
     const source = "[名前](https://example.com)";
-    const parent = renderDocument(source, source.indexOf("名前") + 1);
+    const parent = renderDocument(source, {
+      anchor: source.indexOf("名前"),
+      head: source.indexOf("名前") + 2,
+    });
 
-    expect(parent.querySelector(".mqm-link-text")).toBeNull();
+    expect(parent.querySelector(".mqm-link-text")?.textContent).toBe("名前");
     expect(parent.textContent).toContain(source);
+  });
+
+  it("編集中も見出しとリストの行装飾を維持して記号だけ原文へ戻す", () => {
+    const heading = renderDocument("# 見出し", 2);
+    expect(heading.querySelector(".mqm-heading-1")?.textContent).toBe(
+      "# 見出し",
+    );
+
+    const list = renderDocument("- 項目", 3);
+    expect(list.querySelector(".mqm-list-line")?.textContent).toBe("- 項目");
+    expect(list.querySelector(".mqm-list-marker")).toBeNull();
+  });
+
+  it("編集中もインラインコードとコードブロックの装飾を維持する", () => {
+    const inlineSource = "`code`";
+    const inline = renderDocument(inlineSource, 2);
+    expect(inline.querySelector(".mqm-inline-code")?.textContent).toBe("code");
+    expect(inline.textContent).toContain(inlineSource);
+
+    const blockSource = "```ts\nconst value = 1;\n```";
+    const block = renderDocument(blockSource, blockSource.indexOf("value"));
+    expect(block.querySelectorAll(".mqm-code-block-line")).toHaveLength(3);
+    expect(block.textContent).toContain("```ts");
+    expect(block.textContent).toContain("```");
+  });
+
+  it("表の枠とセルを維持したままセル本文を直接編集する", () => {
+    loadApplicationStyles();
+    const source = "| 項目 | 値 |\n| --- | --- |\n| 名前 \\| 別名 | |";
+    const parent = renderDocument(source, source.indexOf("名前") + 1);
+    const editorElement = parent.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+
+    expect(parent.querySelectorAll(".mqm-table-row")).toHaveLength(2);
+    expect(parent.querySelectorAll(".mqm-table-cell")).toHaveLength(4);
+    expect(parent.querySelectorAll(".mqm-table-empty-cell")).toHaveLength(1);
+    expect(
+      window.getComputedStyle(parent.querySelector(".mqm-table-row")!).display,
+    ).toBe("grid");
+
+    const position = view.state.doc.toString().indexOf("名前");
+    view.dispatch({ changes: { from: position, to: position + 2, insert: "氏名" } });
+    expect(view.state.doc.toString()).toContain("| 氏名 \\| 別名 | |");
+    expect(parent.querySelectorAll(".mqm-table-row")).toHaveLength(2);
+  });
+
+  it("編集中の数式と水平線は装飾と原文を併記する", () => {
+    const mathSource = "$$x^2$$";
+    const math = renderDocument(mathSource, 3);
+    expect(math.querySelector(".mqm-math-display .katex")).not.toBeNull();
+    expect(math.textContent).toContain(mathSource);
+
+    const ruleSource = "---";
+    const rule = renderDocument(ruleSource, 1);
+    expect(rule.querySelector(".mqm-horizontal-rule")).not.toBeNull();
+    expect(rule.textContent).toContain(ruleSource);
+  });
+
+  it("閲覧モードでは選択してもMarkdown原文へ戻さない", () => {
+    const source = "[名前](https://example.com)\n\n$$x^2$$";
+    const parent = renderDocument(source, source.indexOf("名前") + 1, true);
+
+    expect(parent.querySelector(".mqm-link-text")?.textContent).toBe("名前");
+    expect(parent.textContent).not.toContain("https://example.com");
+    expect(parent.querySelector(".mqm-math-display .katex")).not.toBeNull();
   });
 
   it("引用階層ごとに一文字幅で縦線を追加する", () => {

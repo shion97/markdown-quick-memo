@@ -150,44 +150,32 @@ class RuleWidget extends WidgetType {
   }
 }
 
-class TableWidget extends WidgetType {
+class EmptyTableCellWidget extends WidgetType {
   constructor(
-    private readonly rows: readonly (readonly string[])[],
     private readonly sourcePosition: number,
+    private readonly heading: boolean,
   ) {
     super();
   }
 
-  eq(other: TableWidget): boolean {
-    return JSON.stringify(this.rows) === JSON.stringify(other.rows);
+  eq(other: EmptyTableCellWidget): boolean {
+    return (
+      this.sourcePosition === other.sourcePosition &&
+      this.heading === other.heading
+    );
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const table = document.createElement("table");
-    table.className = "mqm-table";
-    const [heading, ...bodyRows] = this.rows;
-    if (heading) {
-      const head = table.createTHead().insertRow();
-      for (const value of heading) {
-        const cell = document.createElement("th");
-        appendTableCellContent(cell, value);
-        head.append(cell);
-      }
-    }
-    const body = table.createTBody();
-    for (const row of bodyRows) {
-      const tableRow = body.insertRow();
-      for (const value of row) {
-        const cell = tableRow.insertCell();
-        appendTableCellContent(cell, value);
-      }
-    }
-    table.addEventListener("mousedown", (event) => {
+    const cell = document.createElement("span");
+    cell.className = this.heading
+      ? "mqm-table-cell mqm-table-cell-heading mqm-table-empty-cell"
+      : "mqm-table-cell mqm-table-empty-cell";
+    cell.addEventListener("mousedown", (event) => {
       event.preventDefault();
       view.dispatch({ selection: { anchor: this.sourcePosition } });
       view.focus();
     });
-    return table;
+    return cell;
   }
 
   ignoreEvent(): boolean {
@@ -195,83 +183,16 @@ class TableWidget extends WidgetType {
   }
 }
 
-interface InlineCodeRange extends ProtectedRange {
-  content: string;
-}
-
-function findInlineCodeRanges(source: string): InlineCodeRange[] {
-  const ranges: InlineCodeRange[] = [];
-  let position = 0;
-  while (position < source.length) {
-    if (source[position] !== "`") {
-      position += 1;
-      continue;
-    }
-    let markerLength = 1;
-    while (source[position + markerLength] === "`") {
-      markerLength += 1;
-    }
-    const marker = "`".repeat(markerLength);
-    const contentFrom = position + markerLength;
-    const closing = source.indexOf(marker, contentFrom);
-    if (closing < 0) {
-      position = contentFrom;
-      continue;
-    }
-    let content = source.slice(contentFrom, closing);
-    if (
-      content.startsWith(" ") &&
-      content.endsWith(" ") &&
-      content.trim().length > 0
-    ) {
-      content = content.slice(1, -1);
-    }
-    ranges.push({
-      from: position,
-      to: closing + markerLength,
-      content,
-    });
-    position = closing + markerLength;
-  }
-  return ranges;
-}
-
-function appendTableCellContent(cell: HTMLElement, source: string): void {
-  const inlineCode = findInlineCodeRanges(source);
-  const ranges = [
-    ...inlineCode.map((range) => ({ ...range, kind: "code" as const })),
-    ...findMathRanges(source, 0, inlineCode).map((range) => ({
-      ...range,
-      kind: "math" as const,
-    })),
-  ].sort((left, right) => left.from - right.from);
-  let position = 0;
-  for (const range of ranges) {
-    cell.append(document.createTextNode(source.slice(position, range.from)));
-    if (range.kind === "code") {
-      const codeElement = document.createElement("code");
-      codeElement.className = "mqm-inline-code";
-      codeElement.textContent = range.content;
-      cell.append(codeElement);
-    } else {
-      const mathElement = document.createElement("span");
-      mathElement.className = "mqm-math-inline";
-      try {
-        mathElement.innerHTML = renderMath(range.expression, false);
-      } catch {
-        mathElement.textContent = source.slice(range.from, range.to);
-        mathElement.classList.add("mqm-math-fallback");
-      }
-      cell.append(mathElement);
-    }
-    position = range.to;
-  }
-  cell.append(document.createTextNode(source.slice(position)));
-}
-
 interface DocumentSegment {
   from: number;
   to: number;
+}
+
+interface DecorationEntry {
+  from: number;
+  to: number;
+  decoration: Decoration;
+  allowOverlap?: boolean;
 }
 
 function documentSegment(state: EditorState): DocumentSegment {
@@ -301,12 +222,12 @@ function protectedRanges(
   return protectedNodes;
 }
 
-function selectionTouches(
+function editingTouches(
   state: EditorState,
   from: number,
   to: number,
 ): boolean {
-  return state.selection.ranges.some(
+  return !state.readOnly && state.selection.ranges.some(
     (selection) => selection.from <= to && selection.to >= from,
   );
 }
@@ -326,45 +247,86 @@ function insideFencedCode(state: EditorState, position: number): boolean {
   return false;
 }
 
-function splitTableRow(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-  const cells: string[] = [];
-  let current = "";
+interface TableCellRange {
+  from: number;
+  to: number;
+  segmentFrom: number;
+  segmentTo: number;
+}
+
+function tableRowRanges(line: {
+  from: number;
+  to: number;
+  text: string;
+}): { cells: TableCellRange[]; separators: number[] } {
+  const separators: number[] = [];
   let escaped = false;
   let inMath = false;
-  for (const character of trimmed) {
+  for (let index = 0; index < line.text.length; index += 1) {
+    const character = line.text[index];
     if (escaped) {
-      current += character;
       escaped = false;
       continue;
     }
     if (character === "\\") {
-      current += character;
       escaped = true;
       continue;
     }
     if (character === "$") {
       inMath = !inMath;
-      current += character;
       continue;
     }
     if (character === "|" && !inMath) {
-      cells.push(current.trim());
-      current = "";
-      continue;
+      separators.push(index);
     }
-    current += character;
   }
-  cells.push(current.trim());
-  return cells;
+
+  const segments: { from: number; to: number }[] = [];
+  const firstSeparator = separators[0];
+  let segmentFrom =
+    firstSeparator !== undefined &&
+    line.text.slice(0, firstSeparator).trim().length === 0
+      ? firstSeparator + 1
+      : 0;
+  for (const separator of separators) {
+    if (separator >= segmentFrom) {
+      segments.push({ from: segmentFrom, to: separator });
+    }
+    segmentFrom = separator + 1;
+  }
+  if (
+    segmentFrom < line.text.length &&
+    line.text.slice(segmentFrom).trim().length > 0
+  ) {
+    segments.push({ from: segmentFrom, to: line.text.length });
+  }
+
+  return {
+    separators: separators.map((position) => line.from + position),
+    cells: segments.map((segment) => {
+      let from = segment.from;
+      let to = segment.to;
+      while (from < to && /[ \t]/.test(line.text[from] ?? "")) {
+        from += 1;
+      }
+      while (to > from && /[ \t]/.test(line.text[to - 1] ?? "")) {
+        to -= 1;
+      }
+      return {
+        from: line.from + from,
+        to: line.from + to,
+        segmentFrom: line.from + segment.from,
+        segmentTo: line.from + segment.to,
+      };
+    }),
+  };
 }
 
-function tableDecoration(
+function tableDecorations(
   document: Text,
   startLineNumber: number,
   endLineNumber: number,
-  state: EditorState,
-): { from: number; to: number; decoration: Decoration } | null {
+): { entries: DecorationEntry[]; endLineNumber: number } | null {
   if (startLineNumber + 1 > endLineNumber) {
     return null;
   }
@@ -378,7 +340,7 @@ function tableDecoration(
   ) {
     return null;
   }
-  const lines = [heading.text];
+  const lines = [heading];
   let lastLine = separator;
   for (
     let lineNumber = startLineNumber + 2;
@@ -389,21 +351,104 @@ function tableDecoration(
     if (!line.text.includes("|") || line.text.trim() === "") {
       break;
     }
-    lines.push(line.text);
+    lines.push(line);
     lastLine = line;
   }
-  if (selectionTouches(state, heading.from, lastLine.to)) {
-    return null;
-  }
-  const rows = lines.map(splitTableRow);
+  const rows = lines.map(tableRowRanges);
+  const columnCount = Math.max(...rows.map((row) => row.cells.length));
+  const entries: DecorationEntry[] = [
+    {
+      from: separator.from,
+      to: separator.to,
+      decoration: Decoration.replace({ block: true }),
+    },
+  ];
+
+  rows.forEach((row, rowIndex) => {
+    const line = lines[rowIndex];
+    if (!line) {
+      return;
+    }
+    const headingRow = rowIndex === 0;
+    entries.push({
+      from: line.from,
+      to: line.from,
+      decoration: Decoration.line({
+        attributes: {
+          class: [
+            "mqm-table-row",
+            rowIndex === 0 ? "mqm-table-row-start" : "",
+            rowIndex === rows.length - 1 ? "mqm-table-row-end" : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+          style: `--mqm-table-columns: ${columnCount}`,
+        },
+      }),
+    });
+    for (const separatorPosition of row.separators) {
+      entries.push({
+        from: separatorPosition,
+        to: separatorPosition + 1,
+        decoration: Decoration.replace({}),
+      });
+    }
+    row.cells.forEach((cell, cellIndex) => {
+      if (cell.segmentFrom < cell.from) {
+        entries.push({
+          from: cell.segmentFrom,
+          to: cell.from,
+          decoration: Decoration.replace({}),
+        });
+      }
+      if (cell.to < cell.segmentTo) {
+        entries.push({
+          from: cell.to,
+          to: cell.segmentTo,
+          decoration: Decoration.replace({}),
+        });
+      }
+      if (cell.from < cell.to) {
+        entries.push({
+          from: cell.from,
+          to: cell.to,
+          decoration: Decoration.mark({
+            class: headingRow
+              ? "mqm-table-cell mqm-table-cell-heading"
+              : "mqm-table-cell",
+          }),
+          allowOverlap: true,
+        });
+      } else {
+        entries.push({
+          from: cell.from,
+          to: cell.from,
+          decoration: Decoration.widget({
+            widget: new EmptyTableCellWidget(cell.from, headingRow),
+            side: cellIndex + 1,
+          }),
+        });
+      }
+    });
+    for (
+      let cellIndex = row.cells.length;
+      cellIndex < columnCount;
+      cellIndex += 1
+    ) {
+      entries.push({
+        from: line.to,
+        to: line.to,
+        decoration: Decoration.widget({
+          widget: new EmptyTableCellWidget(line.to, headingRow),
+          side: cellIndex + 1,
+        }),
+      });
+    }
+  });
+
   return {
-    from: heading.from,
-    to: lastLine.to,
-    decoration: Decoration.replace({
-      widget: new TableWidget(rows, heading.from),
-      block: true,
-      inclusive: false,
-    }),
+    entries,
+    endLineNumber: lastLine.number,
   };
 }
 
@@ -442,18 +487,18 @@ function quoteDepth(lineText: string): number {
 function lineDecorations(
   state: EditorState,
   segment: DocumentSegment,
-): { from: number; to: number; decoration: Decoration }[] {
-  const results: { from: number; to: number; decoration: Decoration }[] = [];
+): DecorationEntry[] {
+  const results: DecorationEntry[] = [];
   const document = state.doc;
   const startLine = document.lineAt(segment.from).number;
   const endLine = document.lineAt(segment.to).number;
   let lineNumber = startLine;
 
   while (lineNumber <= endLine) {
-    const table = tableDecoration(document, lineNumber, endLine, state);
+    const table = tableDecorations(document, lineNumber, endLine);
     if (table) {
-      results.push(table);
-      lineNumber = document.lineAt(table.to).number + 1;
+      results.push(...table.entries);
+      lineNumber = table.endLineNumber + 1;
       continue;
     }
 
@@ -462,26 +507,45 @@ function lineDecorations(
       lineNumber += 1;
       continue;
     }
-    const lineIsActive = selectionTouches(state, line.from, line.to);
-    if (!lineIsActive) {
-      const heading = /^(#{1,6})(\s+)/.exec(line.text);
-      if (heading) {
-        const level = heading[1]?.length ?? 1;
-        const markerLength = level + (heading[2]?.length ?? 1);
+    const lineIsActive = editingTouches(state, line.from, line.to);
+    const heading = /^(#{1,6})(\s+)/.exec(line.text);
+    if (heading) {
+      const level = heading[1]?.length ?? 1;
+      const markerLength = level + (heading[2]?.length ?? 1);
+      if (!lineIsActive) {
         results.push({
           from: line.from,
           to: line.from + markerLength,
           decoration: Decoration.replace({}),
         });
+      }
+      results.push({
+        from: line.from,
+        to: line.from,
+        decoration: Decoration.line({
+          attributes: { class: `mqm-heading mqm-heading-${level}` },
+        }),
+      });
+    }
+    if (/^\s{0,3}(?:---+|\*\*\*+|___+)\s*$/.test(line.text)) {
+      if (lineIsActive) {
+        results.push({
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.widget({
+            widget: new RuleWidget(),
+            block: true,
+            side: -1,
+          }),
+        });
         results.push({
           from: line.from,
           to: line.from,
           decoration: Decoration.line({
-            attributes: { class: `mqm-heading mqm-heading-${level}` },
+            attributes: { class: "mqm-decoration-source-line" },
           }),
         });
-      }
-      if (/^\s{0,3}(?:---+|\*\*\*+|___+)\s*$/.test(line.text)) {
+      } else {
         results.push({
           from: line.from,
           to: line.to,
@@ -490,34 +554,36 @@ function lineDecorations(
             block: true,
           }),
         });
-        lineNumber += 1;
-        continue;
       }
+      lineNumber += 1;
+      continue;
+    }
 
-      const list =
-        /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
-          line.text,
-        );
-      if (list) {
-        const quote = list[1] ?? "";
-        const indent = list[2] ?? "";
-        const indentation = `${quote}${indent}`;
-        const marker = list[3] ?? "-";
-        const markerFrom = line.from + indentation.length;
-        const markerTo = markerFrom + marker.length + (list[4]?.length ?? 1);
-        const remainder = line.text.slice(markerTo - line.from);
-        const checkbox = /^(\[[ xX]\])([ \t]+)/.exec(remainder);
-        const visualIndent = indent.replace(/\t/g, "  ").length;
-        results.push({
-          from: line.from,
-          to: line.from,
-          decoration: Decoration.line({
-            attributes: {
-              class: "mqm-list-line",
-              style: `--mqm-list-indent: ${visualIndent}ch`,
-            },
-          }),
-        });
+    const list =
+      /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
+        line.text,
+      );
+    if (list) {
+      const quote = list[1] ?? "";
+      const indent = list[2] ?? "";
+      const indentation = `${quote}${indent}`;
+      const marker = list[3] ?? "-";
+      const markerFrom = line.from + indentation.length;
+      const markerTo = markerFrom + marker.length + (list[4]?.length ?? 1);
+      const remainder = line.text.slice(markerTo - line.from);
+      const checkbox = /^(\[[ xX]\])([ \t]+)/.exec(remainder);
+      const visualIndent = indent.replace(/\t/g, "  ").length;
+      results.push({
+        from: line.from,
+        to: line.from,
+        decoration: Decoration.line({
+          attributes: {
+            class: "mqm-list-line",
+            style: `--mqm-list-indent: ${visualIndent}ch`,
+          },
+        }),
+      });
+      if (!lineIsActive) {
         if (checkbox) {
           results.push({
             from: markerFrom,
@@ -540,27 +606,6 @@ function lineDecorations(
             }),
           });
         }
-      }
-
-    }
-    if (lineIsActive) {
-      const activeList =
-        /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
-          line.text,
-        );
-      if (activeList) {
-        const indent = activeList[2] ?? "";
-        const visualIndent = indent.replace(/\t/g, "  ").length;
-        results.push({
-          from: line.from,
-          to: line.from,
-          decoration: Decoration.line({
-            attributes: {
-              class: "mqm-list-line",
-              style: `--mqm-list-indent: ${visualIndent}ch`,
-            },
-          }),
-        });
       }
     }
     const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
@@ -610,8 +655,8 @@ function lineDecorations(
 function inlineMarkerDecorations(
   state: EditorState,
   segment: DocumentSegment,
-): { from: number; to: number; decoration: Decoration }[] {
-  const results: { from: number; to: number; decoration: Decoration }[] = [];
+): DecorationEntry[] {
+  const results: DecorationEntry[] = [];
   syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
@@ -627,34 +672,36 @@ function inlineMarkerDecorations(
         });
       }
       if (node.name === "InlineCode") {
-        if (selectionTouches(state, node.from, node.to)) {
-          return false;
-        }
+        const active = editingTouches(state, node.from, node.to);
         const source = state.doc.sliceString(node.from, node.to);
         const opening = /^`+/.exec(source)?.[0].length ?? 0;
         const closing = /`+$/.exec(source)?.[0].length ?? 0;
         if (opening > 0 && closing > 0 && opening + closing <= source.length) {
-          results.push({
-            from: node.from,
-            to: node.from + opening,
-            decoration: Decoration.replace({}),
-          });
+          if (!active) {
+            results.push({
+              from: node.from,
+              to: node.from + opening,
+              decoration: Decoration.replace({}),
+            });
+          }
           results.push({
             from: node.from + opening,
             to: node.to - closing,
             decoration: Decoration.mark({ class: "mqm-inline-code" }),
           });
-          results.push({
-            from: node.to - closing,
-            to: node.to,
-            decoration: Decoration.replace({}),
-          });
+          if (!active) {
+            results.push({
+              from: node.to - closing,
+              to: node.to,
+              decoration: Decoration.replace({}),
+            });
+          }
         }
         return false;
       }
       if (
         !["EmphasisMark", "StrikethroughMark"].includes(node.name) ||
-        selectionTouches(state, node.from, node.to)
+        editingTouches(state, node.from, node.to)
       ) {
         return;
       }
@@ -671,8 +718,8 @@ function inlineMarkerDecorations(
 function linkDecorations(
   state: EditorState,
   segment: DocumentSegment,
-): { from: number; to: number; decoration: Decoration }[] {
-  const results: { from: number; to: number; decoration: Decoration }[] = [];
+): DecorationEntry[] {
+  const results: DecorationEntry[] = [];
   syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
@@ -680,10 +727,6 @@ function linkDecorations(
       if (node.name !== "Link") {
         return;
       }
-      if (selectionTouches(state, node.from, node.to)) {
-        return false;
-      }
-
       const linkMarks: { from: number; to: number }[] = [];
       let child = node.node.firstChild;
       while (child) {
@@ -702,21 +745,26 @@ function linkDecorations(
         return false;
       }
 
-      results.push({
-        from: node.from,
-        to: openingMark.to,
-        decoration: Decoration.replace({}),
-      });
+      const active = editingTouches(state, node.from, node.to);
+      if (!active) {
+        results.push({
+          from: node.from,
+          to: openingMark.to,
+          decoration: Decoration.replace({}),
+        });
+      }
       results.push({
         from: openingMark.to,
         to: closingLabelMark.from,
         decoration: Decoration.mark({ class: "mqm-link-text" }),
       });
-      results.push({
-        from: closingLabelMark.from,
-        to: node.to,
-        decoration: Decoration.replace({}),
-      });
+      if (!active) {
+        results.push({
+          from: closingLabelMark.from,
+          to: node.to,
+          decoration: Decoration.replace({}),
+        });
+      }
       return false;
     },
   });
@@ -726,18 +774,16 @@ function linkDecorations(
 function fencedCodeDecorations(
   state: EditorState,
   segment: DocumentSegment,
-): { from: number; to: number; decoration: Decoration }[] {
-  const results: { from: number; to: number; decoration: Decoration }[] = [];
+): DecorationEntry[] {
+  const results: DecorationEntry[] = [];
   syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
     enter: (node) => {
-      if (
-        node.name !== "FencedCode" ||
-        selectionTouches(state, node.from, node.to)
-      ) {
+      if (node.name !== "FencedCode") {
         return;
       }
+      const active = editingTouches(state, node.from, node.to);
       const firstLine = state.doc.lineAt(node.from);
       const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1));
       for (
@@ -766,11 +812,13 @@ function fencedCodeDecorations(
       if (opening) {
         const markerFrom = firstLine.from + (opening[1]?.length ?? 0);
         const markerTo = markerFrom + (opening[2]?.length ?? 0);
-        results.push({
-          from: markerFrom,
-          to: markerTo,
-          decoration: Decoration.replace({}),
-        });
+        if (!active) {
+          results.push({
+            from: markerFrom,
+            to: markerTo,
+            decoration: Decoration.replace({}),
+          });
+        }
         if (markerTo < firstLine.to) {
           results.push({
             from: markerTo,
@@ -781,7 +829,7 @@ function fencedCodeDecorations(
       }
 
       const closing = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/.exec(lastLine.text);
-      if (closing) {
+      if (closing && !active) {
         const markerFrom = lastLine.from + (closing[1]?.length ?? 0);
         results.push({
           from: markerFrom,
@@ -796,7 +844,7 @@ function fencedCodeDecorations(
 }
 
 export function buildDecorations(state: EditorState): DecorationSet {
-  const entries: { from: number; to: number; decoration: Decoration }[] = [];
+  const entries: DecorationEntry[] = [];
   const segment = documentSegment(state);
 
   entries.push(...lineDecorations(state, segment));
@@ -809,7 +857,21 @@ export function buildDecorations(state: EditorState): DecorationSet {
     segment.from,
     protectedRanges(state, segment),
   )) {
-    if (selectionTouches(state, math.from, math.to)) {
+    if (editingTouches(state, math.from, math.to)) {
+      entries.push({
+        from: math.from,
+        to: math.from,
+        decoration: Decoration.widget({
+          widget: new MathWidget(math.expression, math.display, math.from),
+          block: math.display,
+          side: -1,
+        }),
+      });
+      entries.push({
+        from: math.from,
+        to: math.to,
+        decoration: Decoration.mark({ class: "mqm-decoration-source" }),
+      });
       continue;
     }
     entries.push({
@@ -828,7 +890,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
   for (const entry of entries.sort(
     (left, right) => left.from - right.from || left.to - right.to,
   )) {
-    if (entry.from === entry.to) {
+    if (entry.from === entry.to || entry.allowOverlap) {
       accepted.push(entry);
       continue;
     }
@@ -852,7 +914,11 @@ export const markdownDecorations = StateField.define<DecorationSet>({
     return buildDecorations(state);
   },
   update(decorations, transaction) {
-    if (transaction.docChanged || transaction.selection) {
+    if (
+      transaction.docChanged ||
+      transaction.selection ||
+      transaction.reconfigured
+    ) {
       return buildDecorations(transaction.state);
     }
     return decorations;

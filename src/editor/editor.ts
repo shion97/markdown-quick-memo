@@ -9,7 +9,12 @@ import {
   searchKeymap,
   searchPanelOpen,
 } from "@codemirror/search";
-import { EditorState, Prec, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  Prec,
+  type Extension,
+} from "@codemirror/state";
 import {
   drawSelection,
   dropCursor,
@@ -32,7 +37,12 @@ export interface EditorCallbacks {
   onControlClick: (position: number) => void;
 }
 
-const editorExtensions = new WeakMap<EditorView, readonly Extension[]>();
+interface EditorRuntime {
+  readonly extensions: readonly Extension[];
+  readonly previewOnly: Compartment;
+}
+
+const editorRuntimes = new WeakMap<EditorView, EditorRuntime>();
 const queuedSearchStatusUpdates = new WeakSet<EditorView>();
 
 const japaneseSearchPhrases: Record<string, string> = {
@@ -152,6 +162,15 @@ function editorTheme(): Extension {
   });
 }
 
+function previewOnlyExtensions(enabled: boolean): Extension {
+  return [
+    EditorState.readOnly.of(enabled),
+    EditorState.transactionFilter.of((transaction) =>
+      enabled && transaction.docChanged ? [] : transaction,
+    ),
+  ];
+}
+
 function countWords(content: string): number {
   const latinWords = content.match(/[A-Za-z0-9_]+/g)?.length ?? 0;
   const japaneseRuns =
@@ -173,6 +192,7 @@ export function createEditor(
 ): EditorView {
   let countTimer: number | undefined;
   let cancelOutlineRefresh: (() => void) | undefined;
+  const previewOnly = new Compartment();
   const extensions: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -247,17 +267,39 @@ export function createEditor(
   ];
   const state = EditorState.create({
     doc: "",
-    extensions,
+    extensions: [...extensions, previewOnly.of(previewOnlyExtensions(false))],
   });
   const view = new EditorView({ state, parent });
-  editorExtensions.set(view, extensions);
+  editorRuntimes.set(view, { extensions, previewOnly });
   return view;
 }
 
+export function setPreviewOnly(view: EditorView, enabled: boolean): void {
+  const runtime = editorRuntimes.get(view);
+  if (!runtime) {
+    throw new Error("エディター設定を変更できません。");
+  }
+  if (view.state.readOnly === enabled) {
+    return;
+  }
+  view.dispatch({
+    effects: runtime.previewOnly.reconfigure(previewOnlyExtensions(enabled)),
+  });
+}
+
 export function replaceDocument(view: EditorView, content: string): void {
-  const extensions = editorExtensions.get(view);
-  if (!extensions) {
+  const runtime = editorRuntimes.get(view);
+  if (!runtime) {
     throw new Error("エディター設定を復元できません。");
   }
-  view.setState(EditorState.create({ doc: content, extensions }));
+  const previewOnly = view.state.readOnly;
+  view.setState(
+    EditorState.create({
+      doc: content,
+      extensions: [
+        ...runtime.extensions,
+        runtime.previewOnly.of(previewOnlyExtensions(previewOnly)),
+      ],
+    }),
+  );
 }

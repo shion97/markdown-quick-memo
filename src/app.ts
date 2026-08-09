@@ -12,6 +12,7 @@ import {
   createEditor,
   documentCounts,
   replaceDocument,
+  setPreviewOnly,
 } from "./editor/editor";
 import {
   buildOutlineTree,
@@ -157,6 +158,7 @@ export class MarkdownQuickMemoApplication {
               <span aria-hidden="true">/</span>
               <span id="status">0 文字 / 0 語</span>
             </div>
+            <button data-action="preview" class="mode-toggle" aria-pressed="false">閲覧モード</button>
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
           </div>
           <div id="more-menu" class="popover" hidden>
@@ -309,6 +311,7 @@ export class MarkdownQuickMemoApplication {
       rename: () => this.renameDocument(),
       reveal: () => this.revealDocument(),
       "export-pdf": () => this.exportPdf(),
+      preview: () => this.togglePreviewOnly(),
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
@@ -1014,6 +1017,22 @@ export class MarkdownQuickMemoApplication {
     } catch (error) {
       await this.showError("半透明表示を切り替えられませんでした", error);
     }
+  }
+
+  private togglePreviewOnly(): void {
+    const enabled = !this.editor.state.readOnly;
+    setPreviewOnly(this.editor, enabled);
+    const button = this.required<HTMLButtonElement>(
+      "button[data-action='preview']",
+    );
+    button.textContent = enabled ? "編集モードへ戻る" : "閲覧モード";
+    button.setAttribute("aria-pressed", String(enabled));
+    button.classList.toggle("mode-toggle-active", enabled);
+    this.editorHost.setAttribute(
+      "aria-label",
+      enabled ? "Markdown閲覧欄" : "Markdown編集欄",
+    );
+    this.editor.focus();
   }
 
   private async showSettings(): Promise<void> {
