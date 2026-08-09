@@ -1,6 +1,7 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
 import {
   closeSearchPanel,
   getSearchQuery,
@@ -24,6 +25,7 @@ import {
   keymap,
   scrollPastEnd,
 } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
 import { markdownInputAssistance } from "./input-assistance";
@@ -36,6 +38,44 @@ export interface EditorCallbacks {
   onCursorChanged: (line: number, column: number) => void;
   onControlClick: (position: number) => void;
 }
+
+const editorHighlightStyle = HighlightStyle.define([
+  { tag: tags.link, textDecoration: "underline" },
+  { tag: tags.heading, fontWeight: "bold" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "bold" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+  {
+    tag: [tags.keyword, tags.operatorKeyword],
+    class: "mqm-syntax-keyword",
+  },
+  {
+    tag: [tags.string, tags.regexp, tags.escape],
+    class: "mqm-syntax-string",
+  },
+  {
+    tag: [tags.atom, tags.bool, tags.null, tags.number, tags.literal],
+    class: "mqm-syntax-constant",
+  },
+  {
+    tag: [tags.comment, tags.docComment],
+    class: "mqm-syntax-comment",
+  },
+  {
+    tag: [tags.typeName, tags.className, tags.namespace, tags.macroName],
+    class: "mqm-syntax-type",
+  },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
+    class: "mqm-syntax-function",
+  },
+  {
+    tag: [tags.variableName, tags.propertyName],
+    class: "mqm-syntax-variable",
+  },
+  { tag: tags.meta, class: "mqm-syntax-meta" },
+  { tag: tags.invalid, class: "mqm-syntax-invalid" },
+]);
 
 interface EditorRuntime {
   readonly extensions: readonly Extension[];
@@ -202,8 +242,9 @@ export function createEditor(
     markdown({
       base: markdownLanguage,
       extensions: [GFM],
+      codeLanguages: languages,
     }),
-    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    syntaxHighlighting(editorHighlightStyle),
     EditorState.phrases.of(japaneseSearchPhrases),
     search({ top: true }),
     Prec.highest(

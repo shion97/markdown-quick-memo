@@ -2,7 +2,7 @@
 
 import { defaultKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, runScopeHandlers } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,16 +128,28 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(view.state.selection.main.head).toBe(4);
   });
 
-  it("通常行のTabを本文と選択範囲を変えずに消費する", () => {
-    const view = createView("本文", 1);
+  it("通常行のTabで半角スペース4個を挿入しBackspaceでまとめて削除する", () => {
+    const view = createView("本文", 0);
 
     expect(press(view, "Tab")).toBe(true);
-    expect(view.state.doc.toString()).toBe("本文");
-    expect(view.state.selection.main.head).toBe(1);
+    expect(view.state.doc.toString()).toBe("    本文");
+    expect(view.state.selection.main.head).toBe(4);
 
-    expect(press(view, "Tab", true)).toBe(true);
+    expect(press(view, "Backspace")).toBe(true);
     expect(view.state.doc.toString()).toBe("本文");
-    expect(view.state.selection.main.head).toBe(1);
+    expect(view.state.selection.main.head).toBe(0);
+  });
+
+  it("行頭の半角スペースは最大4個削除し行中では1文字だけ削除する", () => {
+    const indentation = createView("      本文", 6);
+
+    expect(press(indentation, "Backspace")).toBe(true);
+    expect(indentation.state.doc.toString()).toBe("  本文");
+
+    const inline = createView("a    b", 5);
+
+    expect(press(inline, "Backspace")).toBe(true);
+    expect(inline.state.doc.toString()).toBe("a   b");
   });
 
   it("リスト行のTabとShift+Tabで既存の階層変更を維持する", () => {
@@ -148,6 +160,35 @@ describe("markdownInputAssistanceの実キーバインド", () => {
 
     expect(press(view, "Tab", true)).toBe(true);
     expect(view.state.doc.toString()).toBe("- 項目");
+  });
+
+  it("複数行選択は通常行を4個、リスト行を2個ずつ字下げする", () => {
+    const document = "本文\n- 項目\n末尾";
+    const view = createView(document);
+    view.dispatch({
+      selection: EditorSelection.range(0, document.length),
+    });
+
+    expect(press(view, "Tab")).toBe(true);
+    expect(view.state.doc.toString()).toBe("    本文\n  - 項目\n    末尾");
+
+    expect(press(view, "Tab", true)).toBe(true);
+    expect(view.state.doc.toString()).toBe(document);
+  });
+
+  it("コードフェンス内のリスト風文字列では半角スペース4個を挿入する", () => {
+    const document = "```\n- item\n```";
+    const view = createView(document, 10);
+
+    expect(press(view, "Tab")).toBe(true);
+    expect(view.state.doc.toString()).toBe("```\n- item    \n```");
+  });
+
+  it("空引用のBackspaceは末尾の半角スペースだけを削除する", () => {
+    const view = createView("> ");
+
+    expect(press(view, "Backspace")).toBe(true);
+    expect(view.state.doc.toString()).toBe(">");
   });
 
   it("Enterでリストを一度継続し、空項目の次のEnterで終了する", () => {

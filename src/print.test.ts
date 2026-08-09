@@ -4,6 +4,48 @@ import { describe, expect, it, vi } from "vitest";
 import { preparePrintDocument } from "./print";
 
 describe("preparePrintDocument", () => {
+  it.each(["julia", "jl"])(
+    "%sコードブロックをJuliaとして安全にハイライトする",
+    async (language) => {
+      const target = document.createElement("article");
+      await preparePrintDocument(
+        [
+          "```" + language,
+          "function greet()",
+          '  println("<script>alert(1)</script>")',
+          "end",
+          "```",
+        ].join("\n"),
+        target,
+        vi.fn(),
+      );
+
+      expect(target.querySelector(".hljs-keyword")?.textContent).toBe(
+        "function",
+      );
+      expect(target.querySelector(".hljs-string")?.textContent).toContain(
+        "<script>",
+      );
+      expect(target.querySelector("script")).toBeNull();
+      expect(
+        target.querySelector(".mqm-print-code-language")?.textContent,
+      ).toBe(language);
+    },
+  );
+
+  it("未知言語のコードブロックをプレーン表示する", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument(
+      '```unknown-language\nconst value = "<b>text</b>";\n```',
+      target,
+      vi.fn(),
+    );
+
+    expect(target.querySelector("[class^='hljs-']")).toBeNull();
+    expect(target.querySelector("b")).toBeNull();
+    expect(target.querySelector("code")?.textContent).toContain("<b>text</b>");
+  });
+
   it("MarkdownとKaTeXを印刷用HTMLへ変換する", async () => {
     const target = document.createElement("article");
     await preparePrintDocument(

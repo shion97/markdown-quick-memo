@@ -11,6 +11,13 @@
   --accent: #2859c5;
   --accent-hover: #1f47a2;
   --shadow: 0 12px 35px rgb(15 23 42 / 14%);
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-constant: #0550ae;
+  --syntax-comment: #6e7781;
+  --syntax-type: #8250df;
+  --syntax-function: #8250df;
+  --syntax-variable: #953800;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +32,13 @@
     --accent: #7da2ff;
     --accent-hover: #9ab7ff;
     --shadow: 0 12px 35px rgb(0 0 0 / 35%);
+    --syntax-keyword: #ff7b72;
+    --syntax-string: #a5d6ff;
+    --syntax-constant: #79c0ff;
+    --syntax-comment: #8b949e;
+    --syntax-type: #d2a8ff;
+    --syntax-function: #d2a8ff;
+    --syntax-variable: #ffa657;
   }
 }
 
@@ -652,6 +666,66 @@ button.primary:hover {
   font-style: italic;
 }
 
+.mqm-syntax-keyword,
+.hljs-keyword,
+.hljs-selector-tag {
+  color: var(--syntax-keyword);
+}
+
+.mqm-syntax-string,
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--syntax-string);
+}
+
+.mqm-syntax-constant,
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--syntax-constant);
+}
+
+.mqm-syntax-comment,
+.hljs-comment,
+.hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.mqm-syntax-type,
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: var(--syntax-type);
+}
+
+.mqm-syntax-function,
+.hljs-title.function_,
+.hljs-function .hljs-title {
+  color: var(--syntax-function);
+}
+
+.mqm-syntax-variable,
+.hljs-variable,
+.hljs-params,
+.hljs-attr,
+.hljs-property {
+  color: var(--syntax-variable);
+}
+
+.mqm-syntax-meta,
+.hljs-meta {
+  color: var(--muted);
+}
+
+.mqm-syntax-invalid,
+.hljs-deletion {
+  color: var(--syntax-keyword);
+  text-decoration: underline wavy;
+}
+
 .mqm-heading-1 {
   padding-top: 0.55em !important;
   font-size: 1.72em;
@@ -792,6 +866,13 @@ dialog::backdrop {
     overflow-wrap: anywhere;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+    --syntax-keyword: #cf222e;
+    --syntax-string: #0a3069;
+    --syntax-constant: #0550ae;
+    --syntax-comment: #6e7781;
+    --syntax-type: #8250df;
+    --syntax-function: #8250df;
+    --syntax-variable: #953800;
   }
 
   .print-root p {

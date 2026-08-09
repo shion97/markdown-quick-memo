@@ -179,7 +179,7 @@ export class MarkdownQuickMemoApplication {
               <div class="shortcut-row"><span>表を挿入</span><kbd>Ctrl+T</kbd></div>
               <div class="shortcut-row"><span>太字 / 斜体</span><kbd>Ctrl+B / Ctrl+I</kbd></div>
               <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+X</kbd></div>
-              <div class="shortcut-row"><span>リストを深く / 浅く</span><kbd>Tab / Shift+Tab</kbd></div>
+              <div class="shortcut-row"><span>字下げ / 字上げ</span><kbd>Tab / Shift+Tab</kbd></div>
               <div class="shortcut-row"><span>単純改行</span><kbd>Shift+Enter</kbd></div>
               <div class="shortcut-row"><span>リンク・画像を開く</span><kbd>Ctrl+クリック</kbd></div>
             </section>
