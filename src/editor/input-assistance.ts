@@ -11,6 +11,7 @@ import {
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { tableRowRanges } from "./decorations";
 
 interface Continuation {
   replacementFrom?: number;
@@ -203,6 +204,72 @@ function handleTab(view: EditorView, remove: boolean): boolean {
   return true;
 }
 
+function insideTable(view: EditorView, position: number): boolean {
+  let node = syntaxTree(view.state).resolveInner(position, 1);
+  while (true) {
+    if (node.name === "Table") {
+      return true;
+    }
+    const parent = node.parent;
+    if (!parent) {
+      return false;
+    }
+    node = parent;
+  }
+}
+
+function moveAcrossTableCellBoundary(
+  view: EditorView,
+  direction: "backward" | "forward",
+): boolean {
+  const selection = view.state.selection.main;
+  if (
+    view.state.selection.ranges.length !== 1 ||
+    !selection.empty ||
+    !insideTable(view, selection.head)
+  ) {
+    return false;
+  }
+  const line = view.state.doc.lineAt(selection.head);
+  const cells = tableRowRanges(line).cells;
+  const cellIndex = cells.findIndex(
+    (cell) => selection.head >= cell.from && selection.head <= cell.to,
+  );
+  if (cellIndex < 0) {
+    return false;
+  }
+  const currentCell = cells[cellIndex];
+  const target =
+    direction === "forward" && selection.head === currentCell?.to
+      ? cells[cellIndex + 1]?.from
+      : direction === "backward" && selection.head === currentCell?.from
+        ? cells[cellIndex - 1]?.to
+        : undefined;
+  if (target === undefined) {
+    return false;
+  }
+  view.dispatch({
+    selection: { anchor: target },
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
+function moveCursorBackward(view: EditorView): boolean {
+  return (
+    moveAcrossTableCellBoundary(view, "backward") ||
+    cursorCharBackwardLogical(view)
+  );
+}
+
+function moveCursorForward(view: EditorView): boolean {
+  return (
+    moveAcrossTableCellBoundary(view, "forward") ||
+    cursorCharForwardLogical(view)
+  );
+}
+
 export function createPairInputHandler(): (
   view: EditorView,
   from: number,
@@ -296,8 +363,8 @@ export function markdownInputAssistance(): Extension {
         { key: "Shift-Enter", run: insertPlainLineBreak },
         { key: "Tab", run: (view) => handleTab(view, false) },
         { key: "Shift-Tab", run: (view) => handleTab(view, true) },
-        { key: "ArrowLeft", run: cursorCharBackwardLogical },
-        { key: "ArrowRight", run: cursorCharForwardLogical },
+        { key: "ArrowLeft", run: moveCursorBackward },
+        { key: "ArrowRight", run: moveCursorForward },
         { key: "ArrowUp", run: cursorLineUp },
         { key: "ArrowDown", run: cursorLineDown },
         { key: "Shift-ArrowLeft", run: selectCharBackwardLogical },

@@ -162,13 +162,9 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(view.state.selection.main.head).toBe(7);
   });
 
-  it("左右キーは各種Decorationをまたいでも論理位置を一文字ずつ移動する", () => {
+  it("左右キーは表以外のDecorationをまたいでも論理位置を一文字ずつ移動する", () => {
     const document = [
       "# Heading",
-      "",
-      "| A | B |",
-      "| --- | --- |",
-      "| 1 | 2 |",
       "",
       "$$x^2$$",
       "",
@@ -186,5 +182,23 @@ describe("markdownInputAssistanceの実キーバインド", () => {
       expect(press(view, "ArrowRight")).toBe(true);
       expect(view.state.selection.main.head).toBe(expected);
     }
+  });
+
+  it("左右キー1回で隣の表セルへ移動する", () => {
+    const document = "| 左 |  | 右 |\n| --- | --- | --- |";
+    const leftCellEnd = document.indexOf("左") + 1;
+    const emptyCell = document.indexOf("|  |") + 3;
+    const rightCellStart = document.indexOf("右");
+    const view = createView(document, leftCellEnd);
+
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(emptyCell);
+    expect(press(view, "ArrowRight")).toBe(true);
+    expect(view.state.selection.main.head).toBe(rightCellStart);
+
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(emptyCell);
+    expect(press(view, "ArrowLeft")).toBe(true);
+    expect(view.state.selection.main.head).toBe(leftCellEnd);
   });
 });

@@ -254,7 +254,7 @@ interface TableCellRange {
   segmentTo: number;
 }
 
-function tableRowRanges(line: {
+export function tableRowRanges(line: {
   from: number;
   to: number;
   text: string;
