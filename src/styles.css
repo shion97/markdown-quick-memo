@@ -1,16 +1,26 @@
 :root {
-  font-family: "Segoe UI", "BIZ UDGothic", sans-serif;
-  color: #23272f;
-  background: #f7f8fa;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "BIZ UDGothic", sans-serif;
+  color: #1f1f1f;
+  background: #f3f3f3;
   font-synthesis: none;
-  --surface: #ffffff;
-  --surface-muted: #f3f5f8;
-  --text: #23272f;
-  --muted: #6d7480;
-  --border: #dfe3e8;
-  --accent: #2859c5;
-  --accent-hover: #1f47a2;
-  --shadow: 0 12px 35px rgb(15 23 42 / 14%);
+  --app-background: #f3f3f3;
+  --surface: #fbfbfb;
+  --surface-muted: #f5f5f5;
+  --surface-raised: #ffffff;
+  --control: rgb(255 255 255 / 70%);
+  --control-hover: #f9f9f9;
+  --control-pressed: #f0f0f0;
+  --text: #1f1f1f;
+  --muted: #616161;
+  --border: #e5e5e5;
+  --border-strong: #d1d1d1;
+  --accent: #0067c0;
+  --accent-hover: #005a9e;
+  --accent-pressed: #004578;
+  --focus-ring: #005fb8;
+  --shadow: 0 8px 24px rgb(0 0 0 / 14%), 0 2px 6px rgb(0 0 0 / 8%);
+  --radius-control: 7px;
+  --radius-surface: 12px;
   --syntax-keyword: #cf222e;
   --syntax-string: #0a3069;
   --syntax-constant: #0550ae;
@@ -23,15 +33,23 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color: #e8ebf0;
-    background: #15181d;
-    --surface: #1d2128;
-    --surface-muted: #252a32;
+    background: #202020;
+    --app-background: #202020;
+    --surface: #272727;
+    --surface-muted: #303030;
+    --surface-raised: #2d2d2d;
+    --control: rgb(255 255 255 / 6%);
+    --control-hover: rgb(255 255 255 / 9%);
+    --control-pressed: rgb(255 255 255 / 4%);
     --text: #e8ebf0;
-    --muted: #9ba3af;
-    --border: #363d47;
+    --muted: #b3b3b3;
+    --border: #3d3d3d;
+    --border-strong: #4b4b4b;
     --accent: #7da2ff;
     --accent-hover: #9ab7ff;
-    --shadow: 0 12px 35px rgb(0 0 0 / 35%);
+    --accent-pressed: #648be0;
+    --focus-ring: #9ab7ff;
+    --shadow: 0 8px 28px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%);
     --syntax-keyword: #ff7b72;
     --syntax-string: #a5d6ff;
     --syntax-constant: #79c0ff;
@@ -63,15 +81,34 @@ input {
 
 button {
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   padding: 7px 12px;
   color: var(--text);
-  background: var(--surface);
+  background: var(--control);
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 button:hover {
-  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  background: var(--control-hover);
+}
+
+button:active {
+  background: var(--control-pressed);
+}
+
+button:disabled {
+  color: color-mix(in srgb, var(--muted) 65%, transparent);
+  cursor: default;
+}
+
+:where(button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 button.primary {
@@ -84,11 +121,15 @@ button.primary:hover {
   background: var(--accent-hover);
 }
 
+button.primary:active {
+  background: var(--accent-pressed);
+}
+
 .application-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   color: var(--text);
-  background: var(--surface);
+  background: var(--app-background);
 }
 
 .toolbar {
@@ -100,8 +141,9 @@ button.primary:hover {
   gap: 18px;
   min-height: 52px;
   padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-muted);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 35%) inset;
 }
 
 .brand,
@@ -122,6 +164,7 @@ button.primary:hover {
 
 .brand strong {
   overflow: hidden;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -132,14 +175,18 @@ button.primary:hover {
   flex: 0 0 auto;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: white;
   background: var(--accent);
   font-weight: 700;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
 }
 
 .icon-button {
+  min-width: 32px;
+  min-height: 32px;
   padding: 6px 9px;
+  font-weight: 700;
   letter-spacing: 2px;
 }
 
@@ -153,13 +200,19 @@ button.primary:hover {
   color: white;
   border-color: var(--accent);
   background: var(--accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 16%);
 }
 
 .document-status {
   display: flex;
   gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted);
+  background: var(--control);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -170,11 +223,11 @@ button.primary:hover {
   display: grid;
   width: min(320px, calc(100vw - 28px));
   max-height: calc(100vh - 60px);
-  padding: 4px;
+  padding: 6px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow);
 }
 
@@ -190,9 +243,14 @@ button.primary:hover {
   gap: 8px;
   padding: 3px 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
+  background: transparent;
   font-size: 12px;
   text-align: left;
+}
+
+.popover button:hover {
+  background: var(--control-hover);
 }
 
 .popover-group + .popover-group {
@@ -215,7 +273,11 @@ button.primary:hover {
 
 .popover kbd {
   flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--muted);
+  background: var(--surface-muted);
   font: inherit;
   font-size: 10px;
 }
@@ -233,6 +295,7 @@ button.primary:hover {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--surface);
 }
 
 .editor-host {
@@ -242,6 +305,7 @@ button.primary:hover {
 
 .editor-host .cm-editor {
   position: relative;
+  background: var(--surface);
 }
 
 .editor-host .cm-panels.cm-panels-top {
@@ -263,10 +327,10 @@ button.primary:hover {
   max-height: calc(100vh - 86px);
   padding: 7px 26px 7px 8px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-surface);
   color: var(--text);
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow);
 }
 
@@ -283,16 +347,16 @@ button.primary:hover {
   padding: 4px 6px;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface);
+  border-radius: var(--radius-control);
+  background: var(--control);
 }
 
 .editor-host .cm-panel.cm-search button {
   padding: 4px 7px;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface);
+  border-radius: var(--radius-control);
+  background: var(--control);
 }
 
 .editor-host .cm-panel.cm-search label {
@@ -320,7 +384,7 @@ button.primary:hover {
   min-height: 0;
   padding: 12px 10px;
   border-left: 3px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--surface) 97%, transparent);
+  background: var(--surface-raised);
   box-shadow: var(--shadow);
   transform: translateX(calc(100% - 14px));
   transition: transform 140ms ease-out;
@@ -365,6 +429,12 @@ button.primary:hover {
   border-radius: 4px;
   color: var(--muted);
   background: transparent;
+}
+
+.outline-width-actions button:hover,
+.outline-toggle:hover {
+  color: var(--text);
+  background: var(--control-hover);
 }
 
 .outline-width-actions button {
@@ -423,12 +493,17 @@ button.primary:hover {
   width: 100%;
   padding: 5px 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
+  background: transparent;
   font-size: 12px;
   line-height: 1.45;
   text-align: left;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.outline-item:hover {
+  background: var(--control-hover);
 }
 
 .outline-item-selected {
@@ -746,14 +821,14 @@ button.primary:hover {
 
 dialog {
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow);
 }
 
 dialog::backdrop {
-  background: rgb(15 23 42 / 40%);
+  background: rgb(0 0 0 / 42%);
 }
 
 .image-dialog {
@@ -802,8 +877,8 @@ dialog::backdrop {
   padding: 9px 10px;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
+  border-radius: var(--radius-control);
+  background: var(--control);
 }
 
 .diagnostic {
@@ -820,6 +895,38 @@ dialog::backdrop {
 .fatal-error {
   padding: 32px;
   color: var(--text);
+  background: var(--app-background);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .outline-panel {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --shadow: none;
+  }
+
+  .brand-mark,
+  .mode-toggle-active,
+  button.primary {
+    color: HighlightText;
+    border-color: Highlight;
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+
+  .document-status,
+  .toolbar,
+  .popover,
+  .outline-panel,
+  dialog {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
 }
 
 .print-root {
@@ -1059,6 +1166,7 @@ dialog::backdrop {
 @media (max-width: 640px) {
   .toolbar {
     gap: 8px;
+    padding: 8px;
   }
 
   .brand-mark {
@@ -1068,6 +1176,11 @@ dialog::backdrop {
 
   .document-status {
     gap: 4px;
+    padding: 3px 6px;
     font-size: 11px;
+  }
+
+  .toolbar-actions {
+    gap: 6px;
   }
 }
