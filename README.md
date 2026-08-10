@@ -23,6 +23,12 @@ Windows向けの、キーボード中心のMarkdownメモアプリです。Markd
   - Desktop development with C++相当のMSVC・Windows SDK
 - WebView2 Runtime
 
+現在の環境を変更せず、必要なツールとバージョンを確認します。
+
+```powershell
+pwsh -NoProfile -File .\scripts\check-env.ps1
+```
+
 依存関係を導入します。
 
 ```powershell
@@ -131,20 +137,17 @@ PDF出力時は、Markdownから印刷用HTMLを作成し、編集画面と同�
 ## テスト
 
 ```powershell
-pnpm test
-pnpm lint
-cargo test --manifest-path .\src-tauri\Cargo.toml --locked --all-targets
-cargo clippy --manifest-path .\src-tauri\Cargo.toml --locked --all-targets -- -D warnings
+pwsh -NoProfile -File .\scripts\verify.ps1
 ```
 
-RustコマンドはMSVC環境を読み込んだシェルで実行してください。
+このスクリプトは依存関係を導入せず、TypeScriptのtest・lint・buildとRustのformat・test・clippyを実行します。
 
 ## releaseビルド
 
 Tauri本体、Rustランチャー、NSIS、MSIを作成します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
+pwsh -NoProfile -File .\scripts\build.ps1
 ```
 
 `build.ps1`はTauri版の`build_tauri.ps1`を呼び出す標準入口です。
@@ -159,13 +162,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ## ログオン登録
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
+pwsh -NoProfile -File .\scripts\create_shortcut.ps1
 ```
 
 別のキーを初期設定する場合は、例えば次のように指定します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
+pwsh -NoProfile -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
 ```
 
 `create_shortcut.ps1`はTauri版の`create_tauri_shortcut.ps1`を呼び出す標準入口です。
@@ -175,5 +178,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps
 登録状態は次で確認できます。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_tauri_install.ps1
+pwsh -NoProfile -File .\scripts\verify_tauri_install.ps1
 ```
