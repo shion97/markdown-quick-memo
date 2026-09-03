@@ -15,6 +15,10 @@ src-tauri/gen/
 .idea/
 .vscode/
 
+# Local workflow artifacts
+HANDOFF/
+Fix_AND_AddFunction.md
+
 # Windows-local files
 *.lnk
 Thumbs.db

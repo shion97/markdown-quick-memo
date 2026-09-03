@@ -5,6 +5,7 @@ $CargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $Cargo = Join-Path $CargoBin "cargo.exe"
 $ReleaseExecutable = Join-Path $ProjectRoot "src-tauri\target\release\MarkdownQuickMemo.exe"
 $ReleaseLauncher = Join-Path $ProjectRoot "src-tauri\target\release\MarkdownQuickMemoHotkey.exe"
+$NodeModulesDirectory = Join-Path $ProjectRoot "node_modules"
 $DistributionDirectory = Join-Path $ProjectRoot "dist\MarkdownQuickMemo"
 $DistributionExecutable = Join-Path $DistributionDirectory "MarkdownQuickMemo.exe"
 $LauncherDistributionDirectory = Join-Path $ProjectRoot "dist\MarkdownQuickMemoHotkey"
@@ -27,6 +28,9 @@ $VisualStudioPath = & $VisualStudioInstaller `
 if (-not $VisualStudioPath) {
     throw "Visual Studio C++ Build Tools was not found."
 }
+if (-not (Test-Path -LiteralPath $NodeModulesDirectory)) {
+    throw "Node dependencies were not found. Run 'pnpm install --frozen-lockfile' first."
+}
 
 $RunningApplication = @(Get-Process -Name "MarkdownQuickMemo" -ErrorAction SilentlyContinue)
 if ($RunningApplication.Count -gt 0) {
@@ -38,11 +42,6 @@ Get-Process -Name "MarkdownQuickMemoHotkey" -ErrorAction SilentlyContinue |
 $env:PATH = "$CargoBin;$env:PATH"
 Push-Location $ProjectRoot
 try {
-    & pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) {
-        throw "pnpm install failed."
-    }
-
     & pnpm test
     if ($LASTEXITCODE -ne 0) {
         throw "TypeScript tests failed."

@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { markdownDecorations } from "./decorations";
 
 const views: EditorView[] = [];
+const TEST_SYNTAX_PARSE_TIMEOUT_MS = 500;
 
 function loadApplicationStyles(): void {
   if (!document.head.querySelector("#application-styles")) {
@@ -45,6 +47,8 @@ function renderDocument(
     ],
   });
   const view = new EditorView({ state, parent });
+  ensureSyntaxTree(view.state, view.state.doc.length, TEST_SYNTAX_PARSE_TIMEOUT_MS);
+  view.dispatch({ selection: view.state.selection });
   views.push(view);
   return parent;
 }
@@ -114,6 +118,28 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-list-marker-bullet")).toHaveLength(2);
   });
 
+  it("リスト内のインライン数式を編集中も同じ本文位置に保つ", () => {
+    loadApplicationStyles();
+    const source = "- $aaa$\n\nカーソル位置";
+    const editing = renderDocument(source, source.indexOf("aaa"));
+    const sourceMarker = editing.querySelector<HTMLElement>(
+      ".mqm-list-source-marker",
+    )!;
+    const decorated = renderDocument(source);
+    const decoratedMarker = decorated.querySelector<HTMLElement>(
+      ".mqm-list-marker",
+    )!;
+
+    const inlineMath = editing.querySelector<HTMLElement>(".mqm-math-inline")!;
+    expect(inlineMath.querySelector(".katex")).not.toBeNull();
+    expect(window.getComputedStyle(inlineMath).textIndent).toBe("0px");
+    expect(sourceMarker.textContent).toBe("- ");
+    expect(Number.parseFloat(window.getComputedStyle(sourceMarker).width)).toBe(
+      Number.parseFloat(window.getComputedStyle(decoratedMarker).width) +
+        Number.parseFloat(window.getComputedStyle(decoratedMarker).marginRight),
+    );
+  });
+
   it("見出しへ下線を付けないクラスを適用する", () => {
     const parent = renderDocument("# 見出し\n\nカーソル位置");
 
@@ -165,6 +191,43 @@ describe("markdownDecorations", () => {
     expect(block.querySelectorAll(".mqm-code-block-line")).toHaveLength(3);
     expect(block.textContent).toContain("```ts");
     expect(block.textContent).toContain("```");
+  });
+
+  it("数式原文とコードは通常本文の字体を継承する", () => {
+    loadApplicationStyles();
+    const source = [
+      "通常本文",
+      "",
+      "$x^2$",
+      "",
+      "`inline`",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const mathPosition = source.indexOf("x^2");
+    const parent = renderDocument(source, mathPosition);
+    const normalText = parent.querySelector<HTMLElement>(".cm-content")!;
+    const mathSource = parent.querySelector<HTMLElement>(
+      ".mqm-decoration-source",
+    )!;
+    const inlineCode = parent.querySelector<HTMLElement>(".mqm-inline-code")!;
+    const codeBlock = Array.from(
+      parent.querySelectorAll<HTMLElement>(".mqm-code-block-line"),
+    ).find((line) => line.textContent?.includes("const"))!;
+    const normalStyle = window.getComputedStyle(normalText);
+    const mathStyle = window.getComputedStyle(mathSource);
+
+    expect(mathStyle.fontFamily).toBe(normalStyle.fontFamily);
+    expect(mathStyle.fontSize).toBe(normalStyle.fontSize);
+    expect(mathStyle.color).toBe(normalStyle.color);
+    expect(window.getComputedStyle(inlineCode).fontFamily).toBe(
+      normalStyle.fontFamily,
+    );
+    expect(window.getComputedStyle(codeBlock).fontFamily).toBe(
+      normalStyle.fontFamily,
+    );
   });
 
   it("表の枠とセルを維持したままセル本文を直接編集する", () => {
@@ -223,15 +286,78 @@ describe("markdownDecorations", () => {
   });
 
   it("編集中の数式と水平線は装飾と原文を併記する", () => {
-    const mathSource = "$$x^2$$";
-    const math = renderDocument(mathSource, 3);
+    loadApplicationStyles();
+    const mathSource = "$$\n\\frac{a}{b}\n$$";
+    const math = renderDocument(mathSource, mathSource.indexOf("frac"));
+    const mathEditor = math.querySelector<HTMLElement>(".cm-editor")!;
+    const mathView = EditorView.findFromDOM(mathEditor)!;
     expect(math.querySelector(".mqm-math-display .katex")).not.toBeNull();
-    expect(math.textContent).toContain(mathSource);
+    expect(mathView.state.doc.toString()).toBe(mathSource);
+    expect(
+      math.querySelectorAll(".mqm-math-display-source-line"),
+    ).toHaveLength(3);
+    expect(
+      math.querySelector(".mqm-math-display-source-start"),
+    ).not.toBeNull();
+    expect(
+      math.querySelector(".mqm-math-display-source-end"),
+    ).not.toBeNull();
+    const displaySourceRule = Array.from(document.styleSheets)
+      .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
+      .find(
+        (rule) =>
+          rule instanceof window.CSSStyleRule &&
+          rule.selectorText === ".mqm-math-display-source-line",
+      );
+    expect(
+      displaySourceRule instanceof window.CSSStyleRule
+        ? displaySourceRule.style.background
+        : undefined,
+    ).toBe("var(--surface-muted)");
+
+    const inlineSource = "$x^2$";
+    const inline = renderDocument(inlineSource, 2);
+    expect(inline.querySelector(".mqm-decoration-source")).not.toBeNull();
+    expect(inline.querySelector(".mqm-math-display-source-line")).toBeNull();
+
+    const oneLineDisplay = renderDocument("$$x^2$$", 3);
+    const oneLineSource = oneLineDisplay.querySelector(
+      ".mqm-math-display-source-line",
+    );
+    expect(oneLineSource?.classList).toContain(
+      "mqm-math-display-source-start",
+    );
+    expect(oneLineSource?.classList).toContain("mqm-math-display-source-end");
 
     const ruleSource = "---";
     const rule = renderDocument(ruleSource, 1);
     expect(rule.querySelector(".mqm-horizontal-rule")).not.toBeNull();
     expect(rule.textContent).toContain(ruleSource);
+  });
+
+  it("独立数式に隣接する空行を上下1行ずつ表示上だけ折りたたむ", () => {
+    const source = "前\n\n\n$$x^2$$\n\n\n後";
+    const parent = renderDocument(source);
+    const editorElement = parent.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+
+    expect(parent.querySelectorAll(".mqm-math-gap-collapsed")).toHaveLength(2);
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it("独立数式の隣接空行へカーソルを移すとその行を表示する", () => {
+    const source = "前\n\n$$x^2$$\n\n後";
+    const upperGapPosition = source.indexOf("$$") - 1;
+    const parent = renderDocument(source, upperGapPosition);
+
+    expect(parent.querySelectorAll(".mqm-math-gap-collapsed")).toHaveLength(1);
+  });
+
+  it("行内の数式では周囲の空行を折りたたまない", () => {
+    const source = "前\n\n本文 $$x^2$$\n\n後";
+    const parent = renderDocument(source);
+
+    expect(parent.querySelector(".mqm-math-gap-collapsed")).toBeNull();
   });
 
   it("閲覧モードでは選択してもMarkdown原文へ戻さない", () => {

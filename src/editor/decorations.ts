@@ -9,6 +9,7 @@ import {
 import {
   findMathRanges,
   renderMath,
+  type MathRange,
   type ProtectedRange,
 } from "./math";
 
@@ -227,7 +228,15 @@ function editingTouches(
   from: number,
   to: number,
 ): boolean {
-  return !state.readOnly && state.selection.ranges.some(
+  return !state.readOnly && selectionTouches(state, from, to);
+}
+
+function selectionTouches(
+  state: EditorState,
+  from: number,
+  to: number,
+): boolean {
+  return state.selection.ranges.some(
     (selection) => selection.from <= to && selection.to >= from,
   );
 }
@@ -606,6 +615,12 @@ function lineDecorations(
             }),
           });
         }
+      } else {
+        results.push({
+          from: markerFrom,
+          to: checkbox ? markerTo + checkbox[0].length : markerTo,
+          decoration: Decoration.mark({ class: "mqm-list-source-marker" }),
+        });
       }
     }
     const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
@@ -843,6 +858,54 @@ function fencedCodeDecorations(
   return results;
 }
 
+function displayMathGapDecorations(
+  state: EditorState,
+  mathRanges: readonly MathRange[],
+): DecorationEntry[] {
+  const results: DecorationEntry[] = [];
+  const collapsedLinePositions = new Set<number>();
+
+  const addCollapsedLine = (lineNumber: number): void => {
+    if (lineNumber < 1 || lineNumber > state.doc.lines) {
+      return;
+    }
+    const line = state.doc.line(lineNumber);
+    if (
+      line.text.trim() !== "" ||
+      selectionTouches(state, line.from, line.to) ||
+      collapsedLinePositions.has(line.from)
+    ) {
+      return;
+    }
+    collapsedLinePositions.add(line.from);
+    results.push({
+      from: line.from,
+      to: line.from,
+      decoration: Decoration.line({
+        attributes: { class: "mqm-math-gap-collapsed" },
+      }),
+    });
+  };
+
+  for (const math of mathRanges) {
+    if (!math.display) {
+      continue;
+    }
+    const firstLine = state.doc.lineAt(math.from);
+    const lastLine = state.doc.lineAt(Math.max(math.from, math.to - 1));
+    const standalone =
+      state.doc.sliceString(firstLine.from, math.from).trim() === "" &&
+      state.doc.sliceString(math.to, lastLine.to).trim() === "";
+    if (!standalone) {
+      continue;
+    }
+    addCollapsedLine(firstLine.number - 1);
+    addCollapsedLine(lastLine.number + 1);
+  }
+
+  return results;
+}
+
 export function buildDecorations(state: EditorState): DecorationSet {
   const entries: DecorationEntry[] = [];
   const segment = documentSegment(state);
@@ -852,12 +915,39 @@ export function buildDecorations(state: EditorState): DecorationSet {
   entries.push(...linkDecorations(state, segment));
   entries.push(...fencedCodeDecorations(state, segment));
   const text = state.doc.sliceString(segment.from, segment.to);
-  for (const math of findMathRanges(
+  const mathRanges = findMathRanges(
     text,
     segment.from,
     protectedRanges(state, segment),
-  )) {
+  );
+  entries.push(...displayMathGapDecorations(state, mathRanges));
+  for (const math of mathRanges) {
     if (editingTouches(state, math.from, math.to)) {
+      if (math.display) {
+        const firstLine = state.doc.lineAt(math.from);
+        const lastLine = state.doc.lineAt(Math.max(math.from, math.to - 1));
+        for (
+          let lineNumber = firstLine.number;
+          lineNumber <= lastLine.number;
+          lineNumber += 1
+        ) {
+          const line = state.doc.line(lineNumber);
+          const classes = ["mqm-math-display-source-line"];
+          if (lineNumber === firstLine.number) {
+            classes.push("mqm-math-display-source-start");
+          }
+          if (lineNumber === lastLine.number) {
+            classes.push("mqm-math-display-source-end");
+          }
+          entries.push({
+            from: line.from,
+            to: line.from,
+            decoration: Decoration.line({
+              attributes: { class: classes.join(" ") },
+            }),
+          });
+        }
+      }
       entries.push({
         from: math.from,
         to: math.from,

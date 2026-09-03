@@ -515,6 +515,7 @@ button.primary:active {
 .mqm-math-inline {
   display: inline-block;
   padding: 0 0.12em;
+  text-indent: 0;
   vertical-align: middle;
 }
 
@@ -524,6 +525,15 @@ button.primary:active {
   padding: 0.85em 1em;
   overflow-x: auto;
   text-align: center;
+}
+
+.mqm-math-gap-collapsed {
+  height: 0;
+  min-height: 0;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden;
+  line-height: 0;
 }
 
 .mqm-math-fallback {
@@ -556,6 +566,12 @@ button.primary:active {
   overflow-wrap: anywhere !important;
   text-indent: calc(0px - var(--mqm-list-prefix-width));
   word-break: break-all !important;
+}
+
+.mqm-list-source-marker {
+  display: inline-block;
+  width: 2.75em;
+  text-indent: 0;
 }
 
 .mqm-checkbox {
@@ -688,7 +704,27 @@ button.primary:active {
   box-sizing: border-box;
 }
 
-.mqm-decoration-source,
+.mqm-decoration-source {
+  color: inherit;
+  font: inherit;
+}
+
+.mqm-math-display-source-line {
+  background: var(--surface-muted);
+}
+
+.mqm-math-display-source-start {
+  border-radius: 0.35em 0.35em 0 0;
+}
+
+.mqm-math-display-source-end {
+  border-radius: 0 0 0.35em 0.35em;
+}
+
+.mqm-math-display-source-start.mqm-math-display-source-end {
+  border-radius: 0.35em;
+}
+
 .mqm-decoration-source-line {
   color: var(--muted);
   font-family: "Cascadia Mono", "Consolas", monospace;
@@ -709,7 +745,6 @@ button.primary:active {
   padding: 0.12em 0.3em;
   border-radius: 0.28em;
   background: var(--surface-muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.9em;
 }
 
@@ -722,7 +757,6 @@ button.primary:active {
   padding-right: 1em !important;
   padding-left: 1em !important;
   background: var(--surface-muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
 }
 
 .mqm-code-block-start {
@@ -1022,7 +1056,6 @@ dialog::backdrop {
 
   .print-root .mqm-print-code-block,
   .print-root .mqm-inline-code {
-    font-family: "Cascadia Mono", "Consolas", monospace;
     background: #f3f5f8;
   }
 

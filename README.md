@@ -23,6 +23,12 @@ Windows向けの、キーボード中心のMarkdownメモアプリです。Markd
   - Desktop development with C++相当のMSVC・Windows SDK
 - WebView2 Runtime
 
+現在の環境を変更せず、必要なツールとバージョンを確認します。
+
+```powershell
+pwsh -NoProfile -File .\scripts\check-env.ps1
+```
+
 依存関係を導入します。
 
 ```powershell
@@ -90,7 +96,9 @@ pnpm tauri dev
 ## Markdown表示
 
 - 見出し、太字、斜体、取り消し線、インラインコード、コードブロック、引用、リスト、チェックリスト、表、水平線、リンク、画像を装飾します。
-- カーソルまたは選択範囲に重なる箇所は、見出しサイズ、表の枠、コード背景などの装飾を維持したまま、編集に必要なMarkdown記号だけを原文へ戻します。数式と水平線は装飾と原文を併記します。
+- カーソルまたは選択範囲に重なる箇所は、見出しサイズ、表の枠、コード背景などの装飾を維持したまま、編集に必要なMarkdown記号だけを原文へ戻します。数式と水平線は装飾と原文を併記し、数式原文は通常本文と同じ字体で表示します。独立数式の原文は開始・本文・終了行を一続きの灰色ブロックで表示します。リスト記号は原文表示中も装飾時と同じ幅を確保し、リスト内のインライン数式を含む本文位置を維持します。
+- インラインコードとコードブロックは、背景や構文色を維持しながら通常本文と同じ字体で表示します。
+- 行全体を占める独立数式に空行が隣接する場合、Markdown原文を保持したまま上下各1行を表示上だけ折りたたみます。折りたたんだ行へカーソルまたは選択範囲を移すと再表示します。
 - 表は枠と列配置を維持したまま、各セルのMarkdown原文を直接編集できます。
 - 上部の「閲覧モード」で本文変更を禁止できます。閲覧中も選択、コピー、検索、スクロール、目次移動、リンク操作を利用でき、選択によって装飾は解除されません。
 - 斜体フォントを持たない日本語フォントでも、疑似斜体を使って斜体表示を維持します。
@@ -131,20 +139,17 @@ PDF出力時は、Markdownから印刷用HTMLを作成し、編集画面と同�
 ## テスト
 
 ```powershell
-pnpm test
-pnpm lint
-cargo test --manifest-path .\src-tauri\Cargo.toml --locked --all-targets
-cargo clippy --manifest-path .\src-tauri\Cargo.toml --locked --all-targets -- -D warnings
+pwsh -NoProfile -File .\scripts\verify.ps1
 ```
 
-RustコマンドはMSVC環境を読み込んだシェルで実行してください。
+このスクリプトは依存関係を導入せず、TypeScriptのtest・lint・buildとRustのformat・test・clippyを実行します。
 
 ## releaseビルド
 
 Tauri本体、Rustランチャー、NSIS、MSIを作成します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
+pwsh -NoProfile -File .\scripts\build.ps1
 ```
 
 `build.ps1`はTauri版の`build_tauri.ps1`を呼び出す標準入口です。
@@ -159,13 +164,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ## ログオン登録
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1
+pwsh -NoProfile -File .\scripts\create_shortcut.ps1
 ```
 
 別のキーを初期設定する場合は、例えば次のように指定します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
+pwsh -NoProfile -File .\scripts\create_shortcut.ps1 -Hotkey "CTRL+ALT+Q"
 ```
 
 `create_shortcut.ps1`はTauri版の`create_tauri_shortcut.ps1`を呼び出す標準入口です。
@@ -175,5 +180,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_shortcut.ps
 登録状態は次で確認できます。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_tauri_install.ps1
+pwsh -NoProfile -File .\scripts\verify_tauri_install.ps1
 ```
