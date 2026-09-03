@@ -120,8 +120,8 @@ describe("markdownDecorations", () => {
 
   it("リスト内のインライン数式を編集中も同じ本文位置に保つ", () => {
     loadApplicationStyles();
-    const source = "- 数式 $x^2$ の項目\n\nカーソル位置";
-    const editing = renderDocument(source, source.indexOf("x^2"));
+    const source = "- $aaa$\n\nカーソル位置";
+    const editing = renderDocument(source, source.indexOf("aaa"));
     const sourceMarker = editing.querySelector<HTMLElement>(
       ".mqm-list-source-marker",
     )!;
@@ -130,7 +130,9 @@ describe("markdownDecorations", () => {
       ".mqm-list-marker",
     )!;
 
-    expect(editing.querySelector(".mqm-math-inline .katex")).not.toBeNull();
+    const inlineMath = editing.querySelector<HTMLElement>(".mqm-math-inline")!;
+    expect(inlineMath.querySelector(".katex")).not.toBeNull();
+    expect(window.getComputedStyle(inlineMath).textIndent).toBe("0px");
     expect(sourceMarker.textContent).toBe("- ");
     expect(Number.parseFloat(window.getComputedStyle(sourceMarker).width)).toBe(
       Number.parseFloat(window.getComputedStyle(decoratedMarker).width) +

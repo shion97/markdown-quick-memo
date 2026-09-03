@@ -515,6 +515,7 @@ button.primary:active {
 .mqm-math-inline {
   display: inline-block;
   padding: 0 0.12em;
+  text-indent: 0;
   vertical-align: middle;
 }
 
