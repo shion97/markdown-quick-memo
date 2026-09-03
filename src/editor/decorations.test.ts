@@ -260,10 +260,32 @@ describe("markdownDecorations", () => {
   });
 
   it("編集中の数式と水平線は装飾と原文を併記する", () => {
+    loadApplicationStyles();
     const mathSource = "$$x^2$$";
     const math = renderDocument(mathSource, 3);
     expect(math.querySelector(".mqm-math-display .katex")).not.toBeNull();
     expect(math.textContent).toContain(mathSource);
+    const displaySource = math.querySelector<HTMLElement>(
+      ".mqm-math-display-source",
+    );
+    expect(displaySource).not.toBeNull();
+    const displaySourceRule = Array.from(document.styleSheets)
+      .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
+      .find(
+        (rule) =>
+          rule instanceof window.CSSStyleRule &&
+          rule.selectorText === ".mqm-math-display-source",
+      );
+    expect(
+      displaySourceRule instanceof window.CSSStyleRule
+        ? displaySourceRule.style.background
+        : undefined,
+    ).toBe("var(--surface-muted)");
+
+    const inlineSource = "$x^2$";
+    const inline = renderDocument(inlineSource, 2);
+    expect(inline.querySelector(".mqm-decoration-source")).not.toBeNull();
+    expect(inline.querySelector(".mqm-math-display-source")).toBeNull();
 
     const ruleSource = "---";
     const rule = renderDocument(ruleSource, 1);

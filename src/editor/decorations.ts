@@ -929,7 +929,11 @@ export function buildDecorations(state: EditorState): DecorationSet {
       entries.push({
         from: math.from,
         to: math.to,
-        decoration: Decoration.mark({ class: "mqm-decoration-source" }),
+        decoration: Decoration.mark({
+          class: math.display
+            ? "mqm-decoration-source mqm-math-display-source"
+            : "mqm-decoration-source",
+        }),
       });
       continue;
     }

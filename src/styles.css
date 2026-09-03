@@ -702,6 +702,10 @@ button.primary:active {
   font: inherit;
 }
 
+.mqm-math-display-source {
+  background: var(--surface-muted);
+}
+
 .mqm-decoration-source-line {
   color: var(--muted);
   font-family: "Cascadia Mono", "Consolas", monospace;
