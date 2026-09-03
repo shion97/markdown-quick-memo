@@ -615,6 +615,12 @@ function lineDecorations(
             }),
           });
         }
+      } else {
+        results.push({
+          from: markerFrom,
+          to: checkbox ? markerTo + checkbox[0].length : markerTo,
+          decoration: Decoration.mark({ class: "mqm-list-source-marker" }),
+        });
       }
     }
     const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);

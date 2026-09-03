@@ -567,6 +567,12 @@ button.primary:active {
   word-break: break-all !important;
 }
 
+.mqm-list-source-marker {
+  display: inline-block;
+  width: 2.75em;
+  text-indent: 0;
+}
+
 .mqm-checkbox {
   display: inline-grid;
   place-items: center;

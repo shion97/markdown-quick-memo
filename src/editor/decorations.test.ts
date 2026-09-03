@@ -118,6 +118,26 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-list-marker-bullet")).toHaveLength(2);
   });
 
+  it("リスト内のインライン数式を編集中も同じ本文位置に保つ", () => {
+    loadApplicationStyles();
+    const source = "- 数式 $x^2$ の項目\n\nカーソル位置";
+    const editing = renderDocument(source, source.indexOf("x^2"));
+    const sourceMarker = editing.querySelector<HTMLElement>(
+      ".mqm-list-source-marker",
+    )!;
+    const decorated = renderDocument(source);
+    const decoratedMarker = decorated.querySelector<HTMLElement>(
+      ".mqm-list-marker",
+    )!;
+
+    expect(editing.querySelector(".mqm-math-inline .katex")).not.toBeNull();
+    expect(sourceMarker.textContent).toBe("- ");
+    expect(Number.parseFloat(window.getComputedStyle(sourceMarker).width)).toBe(
+      Number.parseFloat(window.getComputedStyle(decoratedMarker).width) +
+        Number.parseFloat(window.getComputedStyle(decoratedMarker).marginRight),
+    );
+  });
+
   it("見出しへ下線を付けないクラスを適用する", () => {
     const parent = renderDocument("# 見出し\n\nカーソル位置");
 
