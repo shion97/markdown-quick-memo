@@ -526,6 +526,15 @@ button.primary:active {
   text-align: center;
 }
 
+.mqm-math-gap-collapsed {
+  height: 0;
+  min-height: 0;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden;
+  line-height: 0;
+}
+
 .mqm-math-fallback {
   color: #b42318;
   font-family: ui-monospace, "Cascadia Mono", monospace;
@@ -688,7 +697,11 @@ button.primary:active {
   box-sizing: border-box;
 }
 
-.mqm-decoration-source,
+.mqm-decoration-source {
+  color: inherit;
+  font: inherit;
+}
+
 .mqm-decoration-source-line {
   color: var(--muted);
   font-family: "Cascadia Mono", "Consolas", monospace;
@@ -709,7 +722,6 @@ button.primary:active {
   padding: 0.12em 0.3em;
   border-radius: 0.28em;
   background: var(--surface-muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.9em;
 }
 
@@ -722,7 +734,6 @@ button.primary:active {
   padding-right: 1em !important;
   padding-left: 1em !important;
   background: var(--surface-muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
 }
 
 .mqm-code-block-start {
@@ -1022,7 +1033,6 @@ dialog::backdrop {
 
   .print-root .mqm-print-code-block,
   .print-root .mqm-inline-code {
-    font-family: "Cascadia Mono", "Consolas", monospace;
     background: #f3f5f8;
   }
 

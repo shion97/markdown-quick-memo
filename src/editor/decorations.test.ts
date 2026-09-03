@@ -167,6 +167,43 @@ describe("markdownDecorations", () => {
     expect(block.textContent).toContain("```");
   });
 
+  it("数式原文とコードは通常本文の字体を継承する", () => {
+    loadApplicationStyles();
+    const source = [
+      "通常本文",
+      "",
+      "$x^2$",
+      "",
+      "`inline`",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const mathPosition = source.indexOf("x^2");
+    const parent = renderDocument(source, mathPosition);
+    const normalText = parent.querySelector<HTMLElement>(".cm-content")!;
+    const mathSource = parent.querySelector<HTMLElement>(
+      ".mqm-decoration-source",
+    )!;
+    const inlineCode = parent.querySelector<HTMLElement>(".mqm-inline-code")!;
+    const codeBlock = Array.from(
+      parent.querySelectorAll<HTMLElement>(".mqm-code-block-line"),
+    ).find((line) => line.textContent?.includes("const"))!;
+    const normalStyle = window.getComputedStyle(normalText);
+    const mathStyle = window.getComputedStyle(mathSource);
+
+    expect(mathStyle.fontFamily).toBe(normalStyle.fontFamily);
+    expect(mathStyle.fontSize).toBe(normalStyle.fontSize);
+    expect(mathStyle.color).toBe(normalStyle.color);
+    expect(window.getComputedStyle(inlineCode).fontFamily).toBe(
+      normalStyle.fontFamily,
+    );
+    expect(window.getComputedStyle(codeBlock).fontFamily).toBe(
+      normalStyle.fontFamily,
+    );
+  });
+
   it("表の枠とセルを維持したままセル本文を直接編集する", () => {
     loadApplicationStyles();
     const source = "| 項目 | 値 |\n| --- | --- |\n| 名前 \\| 別名 | |";
@@ -232,6 +269,31 @@ describe("markdownDecorations", () => {
     const rule = renderDocument(ruleSource, 1);
     expect(rule.querySelector(".mqm-horizontal-rule")).not.toBeNull();
     expect(rule.textContent).toContain(ruleSource);
+  });
+
+  it("独立数式に隣接する空行を上下1行ずつ表示上だけ折りたたむ", () => {
+    const source = "前\n\n\n$$x^2$$\n\n\n後";
+    const parent = renderDocument(source);
+    const editorElement = parent.querySelector<HTMLElement>(".cm-editor")!;
+    const view = EditorView.findFromDOM(editorElement)!;
+
+    expect(parent.querySelectorAll(".mqm-math-gap-collapsed")).toHaveLength(2);
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it("独立数式の隣接空行へカーソルを移すとその行を表示する", () => {
+    const source = "前\n\n$$x^2$$\n\n後";
+    const upperGapPosition = source.indexOf("$$") - 1;
+    const parent = renderDocument(source, upperGapPosition);
+
+    expect(parent.querySelectorAll(".mqm-math-gap-collapsed")).toHaveLength(1);
+  });
+
+  it("行内の数式では周囲の空行を折りたたまない", () => {
+    const source = "前\n\n本文 $$x^2$$\n\n後";
+    const parent = renderDocument(source);
+
+    expect(parent.querySelector(".mqm-math-gap-collapsed")).toBeNull();
   });
 
   it("閲覧モードでは選択してもMarkdown原文へ戻さない", () => {
