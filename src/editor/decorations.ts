@@ -917,6 +917,31 @@ export function buildDecorations(state: EditorState): DecorationSet {
   entries.push(...displayMathGapDecorations(state, mathRanges));
   for (const math of mathRanges) {
     if (editingTouches(state, math.from, math.to)) {
+      if (math.display) {
+        const firstLine = state.doc.lineAt(math.from);
+        const lastLine = state.doc.lineAt(Math.max(math.from, math.to - 1));
+        for (
+          let lineNumber = firstLine.number;
+          lineNumber <= lastLine.number;
+          lineNumber += 1
+        ) {
+          const line = state.doc.line(lineNumber);
+          const classes = ["mqm-math-display-source-line"];
+          if (lineNumber === firstLine.number) {
+            classes.push("mqm-math-display-source-start");
+          }
+          if (lineNumber === lastLine.number) {
+            classes.push("mqm-math-display-source-end");
+          }
+          entries.push({
+            from: line.from,
+            to: line.from,
+            decoration: Decoration.line({
+              attributes: { class: classes.join(" ") },
+            }),
+          });
+        }
+      }
       entries.push({
         from: math.from,
         to: math.from,
@@ -929,11 +954,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
       entries.push({
         from: math.from,
         to: math.to,
-        decoration: Decoration.mark({
-          class: math.display
-            ? "mqm-decoration-source mqm-math-display-source"
-            : "mqm-decoration-source",
-        }),
+        decoration: Decoration.mark({ class: "mqm-decoration-source" }),
       });
       continue;
     }

@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { markdownDecorations } from "./decorations";
 
 const views: EditorView[] = [];
+const TEST_SYNTAX_PARSE_TIMEOUT_MS = 500;
 
 function loadApplicationStyles(): void {
   if (!document.head.querySelector("#application-styles")) {
@@ -45,6 +47,8 @@ function renderDocument(
     ],
   });
   const view = new EditorView({ state, parent });
+  ensureSyntaxTree(view.state, view.state.doc.length, TEST_SYNTAX_PARSE_TIMEOUT_MS);
+  view.dispatch({ selection: view.state.selection });
   views.push(view);
   return parent;
 }
@@ -261,20 +265,27 @@ describe("markdownDecorations", () => {
 
   it("編集中の数式と水平線は装飾と原文を併記する", () => {
     loadApplicationStyles();
-    const mathSource = "$$x^2$$";
-    const math = renderDocument(mathSource, 3);
+    const mathSource = "$$\n\\frac{a}{b}\n$$";
+    const math = renderDocument(mathSource, mathSource.indexOf("frac"));
+    const mathEditor = math.querySelector<HTMLElement>(".cm-editor")!;
+    const mathView = EditorView.findFromDOM(mathEditor)!;
     expect(math.querySelector(".mqm-math-display .katex")).not.toBeNull();
-    expect(math.textContent).toContain(mathSource);
-    const displaySource = math.querySelector<HTMLElement>(
-      ".mqm-math-display-source",
-    );
-    expect(displaySource).not.toBeNull();
+    expect(mathView.state.doc.toString()).toBe(mathSource);
+    expect(
+      math.querySelectorAll(".mqm-math-display-source-line"),
+    ).toHaveLength(3);
+    expect(
+      math.querySelector(".mqm-math-display-source-start"),
+    ).not.toBeNull();
+    expect(
+      math.querySelector(".mqm-math-display-source-end"),
+    ).not.toBeNull();
     const displaySourceRule = Array.from(document.styleSheets)
       .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
       .find(
         (rule) =>
           rule instanceof window.CSSStyleRule &&
-          rule.selectorText === ".mqm-math-display-source",
+          rule.selectorText === ".mqm-math-display-source-line",
       );
     expect(
       displaySourceRule instanceof window.CSSStyleRule
@@ -285,7 +296,16 @@ describe("markdownDecorations", () => {
     const inlineSource = "$x^2$";
     const inline = renderDocument(inlineSource, 2);
     expect(inline.querySelector(".mqm-decoration-source")).not.toBeNull();
-    expect(inline.querySelector(".mqm-math-display-source")).toBeNull();
+    expect(inline.querySelector(".mqm-math-display-source-line")).toBeNull();
+
+    const oneLineDisplay = renderDocument("$$x^2$$", 3);
+    const oneLineSource = oneLineDisplay.querySelector(
+      ".mqm-math-display-source-line",
+    );
+    expect(oneLineSource?.classList).toContain(
+      "mqm-math-display-source-start",
+    );
+    expect(oneLineSource?.classList).toContain("mqm-math-display-source-end");
 
     const ruleSource = "---";
     const rule = renderDocument(ruleSource, 1);
