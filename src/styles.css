@@ -605,11 +605,14 @@ button.primary:active {
   text-underline-offset: 0.15em;
 }
 
-.mqm-horizontal-rule {
+.cm-editor .mqm-horizontal-rule {
   width: 100%;
-  height: 1px;
-  margin: 0.85em 0;
-  background: var(--border);
+  height: calc(1px + 1.7em);
+  margin: 0;
+  background-image: linear-gradient(var(--border), var(--border));
+  background-position: center;
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
 }
 
 .mqm-quote-line {

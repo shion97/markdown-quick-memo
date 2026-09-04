@@ -111,6 +111,36 @@ describe("markdownDecorations", () => {
     expect(parent.querySelector(".mqm-code-language")?.textContent).toBe("ts");
   });
 
+  it("水平線の上下余白をWidget自身の計測可能な高さに含める", () => {
+    loadApplicationStyles();
+    const inactiveRule = renderDocument("---\n後続行");
+    const activeRule = renderDocument("---\n後続行", 1);
+
+    expect(inactiveRule.querySelector(".mqm-horizontal-rule")).not.toBeNull();
+    expect(activeRule.querySelector(".mqm-horizontal-rule")).not.toBeNull();
+
+    const horizontalRuleStyle = Array.from(document.styleSheets)
+      .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
+      .find(
+        (rule) =>
+          rule instanceof window.CSSStyleRule &&
+          rule.selectorText === ".cm-editor .mqm-horizontal-rule",
+      );
+    expect(horizontalRuleStyle).toBeInstanceOf(window.CSSStyleRule);
+    if (!(horizontalRuleStyle instanceof window.CSSStyleRule)) {
+      return;
+    }
+
+    expect(horizontalRuleStyle.style.margin).toBe("0px");
+    expect(horizontalRuleStyle.style.height).toBe("calc(1.7em + 1px)");
+    expect(horizontalRuleStyle.style.backgroundImage).toContain(
+      "linear-gradient",
+    );
+    expect(horizontalRuleStyle.style.backgroundPosition).toBe("center center");
+    expect(horizontalRuleStyle.style.backgroundSize).toBe("100% 1px");
+    expect(horizontalRuleStyle.style.backgroundRepeat).toBe("no-repeat");
+  });
+
   it("リストのマーカーと折り返し用の行装飾を適用する", () => {
     const parent = renderDocument("- 項目\n  - 子項目\n\nカーソル位置");
 
