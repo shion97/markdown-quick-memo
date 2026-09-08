@@ -37,7 +37,7 @@ url = "=2.5.8"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.38.2"
-windows = "=0.61.3"
+windows = { version = "=0.61.3", features = ["ApplicationModel_DataTransfer"] }
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation",
   "Win32_Storage_FileSystem",

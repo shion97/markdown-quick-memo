@@ -2,10 +2,12 @@
 
 import { languages } from "@codemirror/language-data";
 import { searchPanelOpen } from "@codemirror/search";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { backend } from "./bridge/tauri";
 import { MarkdownQuickMemoApplication } from "./app";
+import { selectedCopyText } from "./editor/editor";
 
 const dialogMocks = vi.hoisted(() => ({
   ask: vi.fn(),
@@ -53,6 +55,81 @@ function saveApplicationDocument(
 }
 
 describe("MarkdownQuickMemoApplication", () => {
+  it("選択したMarkdown原文を改行区切りでコピー対象にする", () => {
+    const source = "日本語😀\nfirst\nsecond";
+    const state = EditorState.create({
+      doc: source,
+      selection: EditorSelection.create([
+        EditorSelection.range(0, 5),
+        EditorSelection.range(12, 18),
+      ]),
+      extensions: [EditorState.allowMultipleSelections.of(true)],
+    });
+
+    expect(selectedCopyText(state)).toBe("日本語😀\nsecond");
+  });
+
+  it("選択なしの場合は独自コピー処理を使わない", () => {
+    const state = EditorState.create({ doc: "本文", selection: { anchor: 1 } });
+
+    expect(selectedCopyText(state)).toBeNull();
+  });
+
+  it.each([false, true])(
+    "本文の選択コピーをWindows側へ渡す（閲覧モード: %s）",
+    async (previewOnly) => {
+      const root = document.createElement("div");
+      document.body.append(root);
+      const application = new MarkdownQuickMemoApplication(root);
+      setApplicationDocument(application, "先頭\n日本語😀\n末尾", null);
+      const view = EditorView.findFromDOM(
+        root.querySelector<HTMLElement>(".cm-editor")!,
+      )!;
+      if (previewOnly) {
+        root
+          .querySelector<HTMLButtonElement>("button[data-action='preview']")!
+          .click();
+      }
+      view.dispatch({ selection: { anchor: 3, head: 8 } });
+      const documentBeforeCopy = view.state.doc.toString();
+      const selectionBeforeCopy = view.state.selection;
+      const copyText = vi.spyOn(backend, "copyText").mockResolvedValue();
+
+      const copyEvent = new Event("copy", { bubbles: true, cancelable: true });
+      view.contentDOM.dispatchEvent(copyEvent);
+      await Promise.resolve();
+
+      expect(copyEvent.defaultPrevented).toBe(true);
+      expect(copyText).toHaveBeenCalledWith("日本語😀");
+      expect(view.state.doc.toString()).toBe(documentBeforeCopy);
+      expect(view.state.selection.eq(selectionBeforeCopy)).toBe(true);
+    },
+  );
+
+  it("Windows側のコピー失敗を画面に表示する", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "コピー対象", null);
+    const view = EditorView.findFromDOM(
+      root.querySelector<HTMLElement>(".cm-editor")!,
+    )!;
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    vi.spyOn(backend, "copyText").mockRejectedValue(
+      new Error("クリップボードが使用中です"),
+    );
+
+    view.contentDOM.dispatchEvent(
+      new Event("copy", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(dialogMocks.message).toHaveBeenCalledOnce());
+
+    expect(dialogMocks.message).toHaveBeenCalledWith(
+      "クリップボードが使用中です",
+      { title: "コピーできませんでした", kind: "error" },
+    );
+  });
+
   it("Juliaコードブロックを言語別にハイライトする", async () => {
     const julia = languages.find((language) => language.name === "Julia");
     expect(julia).toBeDefined();

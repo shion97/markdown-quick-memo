@@ -1,3 +1,4 @@
+use crate::clipboard;
 use crate::document::{ensure_markdown_suffix, read_markdown, write_markdown};
 use crate::launcher_protocol;
 use crate::lifecycle::show_main_window;
@@ -341,6 +342,11 @@ pub fn set_window_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn copy_text(text: String) -> Result<(), String> {
+    clipboard::write_text(&text)
 }
 
 #[tauri::command]

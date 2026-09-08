@@ -69,6 +69,7 @@ export const backend = {
     invoke("open_external_url", { url }),
   setWindowOpacity: (opacity: number): Promise<void> =>
     invoke("set_window_opacity", { opacity }),
+  copyText: (text: string): Promise<void> => invoke("copy_text", { text }),
 };
 
 export function onBackendEvent(
