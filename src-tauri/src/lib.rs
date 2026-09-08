@@ -1,3 +1,4 @@
+mod clipboard;
 mod commands;
 mod document;
 mod launcher_protocol;
@@ -74,6 +75,7 @@ pub fn run() {
             commands::open_pdf,
             commands::open_external_url,
             commands::set_window_opacity,
+            commands::copy_text,
             commands::ensure_markdown_path,
         ])
         .setup(|_app| {

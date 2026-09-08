@@ -37,6 +37,7 @@ export interface EditorCallbacks {
   onOutlineChanged: (headings: OutlineHeading[]) => void;
   onCursorChanged: (line: number, column: number) => void;
   onControlClick: (position: number) => void;
+  onCopyText: (text: string) => void;
 }
 
 const editorHighlightStyle = HighlightStyle.define([
@@ -226,6 +227,13 @@ export function documentCounts(content: string): {
   return { characters: content.length, words: countWords(content) };
 }
 
+export function selectedCopyText(state: EditorState): string | null {
+  const selected = state.selection.ranges
+    .filter((range) => !range.empty)
+    .map((range) => state.sliceDoc(range.from, range.to));
+  return selected.length > 0 ? selected.join(state.lineBreak) : null;
+}
+
 export function createEditor(
   parent: HTMLElement,
   callbacks: EditorCallbacks,
@@ -290,6 +298,14 @@ export function createEditor(
       }, 120);
     }),
     EditorView.domEventHandlers({
+      copy: (_event, view) => {
+        const text = selectedCopyText(view.state);
+        if (text === null) {
+          return false;
+        }
+        callbacks.onCopyText(text);
+        return true;
+      },
       mousedown: (event, view) => {
         if (!(event.ctrlKey || event.metaKey)) {
           return false;

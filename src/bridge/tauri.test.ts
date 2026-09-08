@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: tauriMocks.listen,
 }));
 
-import { invokeWithBackendPayload } from "./tauri";
+import { backend, invokeWithBackendPayload } from "./tauri";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -75,5 +75,17 @@ describe("invokeWithBackendPayload", () => {
 
     await expectation;
     expect(unlisten).toHaveBeenCalledOnce();
+  });
+});
+
+describe("backend", () => {
+  it("コピー文字列をcopy_textコマンドへ渡す", async () => {
+    tauriMocks.invoke.mockResolvedValue(undefined);
+
+    await backend.copyText("日本語😀\n複数行");
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("copy_text", {
+      text: "日本語😀\n複数行",
+    });
   });
 });

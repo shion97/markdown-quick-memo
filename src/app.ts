@@ -114,6 +114,9 @@ export class MarkdownQuickMemoApplication {
       onControlClick: (position) => {
         void this.handleControlClick(position);
       },
+      onCopyText: (text) => {
+        void this.copyText(text);
+      },
     });
     this.bindActions();
     this.updateOutlineWidth(0);
@@ -1091,6 +1094,14 @@ export class MarkdownQuickMemoApplication {
       title,
       kind: "error",
     });
+  }
+
+  private async copyText(text: string): Promise<void> {
+    try {
+      await backend.copyText(text);
+    } catch (error) {
+      await this.showError("コピーできませんでした", error);
+    }
   }
 
   private required<T extends HTMLElement>(selector: string): T {
