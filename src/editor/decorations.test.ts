@@ -399,14 +399,24 @@ describe("markdownDecorations", () => {
     expect(parent.querySelector(".mqm-math-display .katex")).not.toBeNull();
   });
 
-  it("引用階層ごとに一文字幅で縦線を追加する", () => {
+  it("連続記号と空白区切りの引用へ階層ごとの縦線を追加する", () => {
     const parent = renderDocument(
-      "> 一階層\n> > 二階層\n> > > 三階層\n\nカーソル位置",
+      "> 一階層\n>>>> 四階層\n> > 二階層\n\nカーソル位置",
     );
 
     expect(parent.querySelectorAll(".mqm-quote-line")).toHaveLength(3);
     expect(parent.querySelectorAll(".mqm-quote-markers")).toHaveLength(3);
-    expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(6);
+    expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(7);
+  });
+
+  it("最後の引用記号直後に半角スペースがない行は装飾しない", () => {
+    const parent = renderDocument(
+      ">本文\n>>>>本文\n>>>>\t本文\n> > > >本文\n>>>>- 項目\n\nカーソル位置",
+    );
+
+    expect(parent.querySelector(".mqm-quote-line")).toBeNull();
+    expect(parent.querySelector(".mqm-quote-markers")).toBeNull();
+    expect(parent.querySelector(".mqm-list-line")).toBeNull();
   });
 
   it("編集中の引用でも縦線とMarkdown原文を同時表示する", () => {

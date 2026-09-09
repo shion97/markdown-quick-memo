@@ -185,10 +185,10 @@ describe("markdownInputAssistanceの実キーバインド", () => {
   });
 
   it("空引用のBackspaceは末尾の半角スペースだけを削除する", () => {
-    const view = createView("> ");
+    const view = createView(">>>> ");
 
     expect(press(view, "Backspace")).toBe(true);
-    expect(view.state.doc.toString()).toBe(">");
+    expect(view.state.doc.toString()).toBe(">>>>");
   });
 
   it("Enterでリストを一度継続し、空項目の次のEnterで終了する", () => {

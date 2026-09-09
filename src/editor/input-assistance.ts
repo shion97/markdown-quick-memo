@@ -17,6 +17,7 @@ import {
 } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tableRowRanges } from "./decorations";
+import { parseQuotePrefix } from "./quote-prefix";
 
 interface Continuation {
   replacementFrom?: number;
@@ -30,14 +31,43 @@ interface TextChange {
   inserted: string;
 }
 
-const LIST_PATTERN =
-  /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/;
-const QUOTE_PATTERN = /^((?:[ \t]*>[ \t]?)+)(.*)$/;
 const NORMAL_INDENT = "    ";
 const LIST_INDENT = "  ";
 
 function reducedQuotePrefix(prefix: string): string {
-  return prefix.slice(0, prefix.lastIndexOf(">"));
+  const lastMarker = prefix.lastIndexOf(">");
+  const previousMarker = prefix.slice(0, lastMarker).lastIndexOf(">");
+  return previousMarker < 0
+    ? prefix.slice(0, lastMarker)
+    : `${prefix.slice(0, previousMarker + 1)} `;
+}
+
+interface ListMatch {
+  quote: string;
+  indent: string;
+  marker: string;
+  spacing: string;
+  checkbox: string;
+  content: string;
+}
+
+function matchList(lineText: string): ListMatch | null {
+  const quote = parseQuotePrefix(lineText)?.text ?? "";
+  const list =
+    /^([ \t]*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?(.*)$/.exec(
+      lineText.slice(quote.length),
+    );
+  if (!list) {
+    return null;
+  }
+  return {
+    quote,
+    indent: list[1] ?? "",
+    marker: list[2] ?? "-",
+    spacing: list[3] ?? " ",
+    checkbox: list[4] ?? "",
+    content: list[5] ?? "",
+  };
 }
 
 export function continuationForLine(
@@ -45,14 +75,9 @@ export function continuationForLine(
   cursorOffset: number,
 ): Continuation {
   const beforeCursor = lineText.slice(0, cursorOffset);
-  const list = LIST_PATTERN.exec(beforeCursor);
+  const list = matchList(beforeCursor);
   if (list) {
-    const quote = list[1] ?? "";
-    const indent = list[2] ?? "";
-    const marker = list[3] ?? "-";
-    const spacing = list[4] ?? " ";
-    const checkbox = list[5] ?? "";
-    const content = list[6] ?? "";
+    const { quote, indent, marker, spacing, checkbox, content } = list;
     if (content.trim() === "") {
       return {
         replacementFrom: quote.length,
@@ -67,10 +92,10 @@ export function continuationForLine(
     };
   }
 
-  const quote = QUOTE_PATTERN.exec(beforeCursor);
+  const quote = parseQuotePrefix(beforeCursor);
   if (quote) {
-    const prefix = quote[1] ?? "";
-    const content = quote[2] ?? "";
+    const prefix = quote.text;
+    const content = beforeCursor.slice(prefix.length);
     if (content.trim() === "") {
       return {
         replacementFrom: 0,
@@ -91,10 +116,10 @@ export function quoteSpaceDeletionForLine(
 ): TextChange | null {
   const beforeCursor = lineText.slice(0, cursorOffset);
   const afterCursor = lineText.slice(cursorOffset);
-  const quote = QUOTE_PATTERN.exec(beforeCursor);
+  const quote = parseQuotePrefix(beforeCursor);
   if (
     !quote ||
-    (quote[2] ?? "") !== "" ||
+    beforeCursor.slice(quote.text.length) !== "" ||
     !beforeCursor.endsWith(" ") ||
     afterCursor.trim() !== ""
   ) {
@@ -203,11 +228,9 @@ function indentationChange(
   line: { from: number; text: string },
   remove: boolean,
 ): ChangeSpec | null {
-  const list = inCodeBlock(view, line.from)
-    ? null
-    : LIST_PATTERN.exec(line.text);
-  const quoteLength = (list?.[1] ?? "").length;
-  const indentation = list?.[2] ?? /^ */.exec(line.text)?.[0] ?? "";
+  const list = inCodeBlock(view, line.from) ? null : matchList(line.text);
+  const quoteLength = list?.quote.length ?? 0;
+  const indentation = list?.indent ?? /^ */.exec(line.text)?.[0] ?? "";
   const indentationPosition = line.from + quoteLength;
   const indent = list ? LIST_INDENT : NORMAL_INDENT;
   if (!remove) {
@@ -250,7 +273,7 @@ function handleTab(view: EditorView, remove: boolean): boolean {
     return true;
   }
   const line = view.state.doc.lineAt(selection.head);
-  const list = inCodeBlock(view, line.from) ? null : LIST_PATTERN.exec(line.text);
+  const list = inCodeBlock(view, line.from) ? null : matchList(line.text);
   if (list || remove) {
     const change = indentationChange(view, line, remove);
     if (change) {
