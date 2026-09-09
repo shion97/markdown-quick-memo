@@ -79,16 +79,21 @@ describe("continuationForLine", () => {
     expect(continuationForLine(">>>> 本文", 7).inserted).toBe("\n>>>> ");
   });
 
-  it("最後の引用記号直後に半角スペースがない行は通常改行する", () => {
-    for (const source of [
-      ">本文",
-      ">>>>本文",
-      ">>>>\t本文",
-      "> > > >本文",
-      ">>>>- 項目",
+  it("半角スペースがない引用と引用内リストも継続する", () => {
+    for (const [source, prefix] of [
+      [">本文", ">"],
+      [">>>>本文", ">>>>"],
+      [">>>>\t本文", ">>>>\t"],
+      ["> > > >本文", "> > > >"],
+      [">>>>- 項目", ">>>>- "],
     ]) {
-      expect(continuationForLine(source, source.length).inserted).toBe("\n");
+      expect(continuationForLine(source!, source!.length).inserted).toBe(`\n${prefix}`);
     }
+  });
+
+  it("スペースなしの空引用を一段ずつ終了する", () => {
+    expect(continuationForLine(">", 1)).toEqual({ replacementFrom: 0, replacementTo: 1, inserted: "" });
+    expect(continuationForLine(">>", 2)).toEqual({ replacementFrom: 0, replacementTo: 2, inserted: "> " });
   });
 });
 

@@ -191,6 +191,26 @@ describe("markdownInputAssistanceの実キーバインド", () => {
     expect(view.state.doc.toString()).toBe(">>>>");
   });
 
+  it("スペースなしの引用を継続し空引用から脱出する", () => {
+    const view = createView(">本文");
+    expect(press(view, "Enter")).toBe(true);
+    expect(view.state.doc.toString()).toBe(">本文\n>");
+    expect(press(view, "Enter")).toBe(true);
+    expect(view.state.doc.toString()).toBe(">本文\n");
+  });
+
+  it("スペースなしの引用記号をBackspaceで削除できる", () => {
+    const view = createView(">");
+    expect(press(view, "Backspace")).toBe(true);
+    expect(view.state.doc.toString()).toBe("");
+  });
+
+  it("コードフェンス内の引用をEnterで継続しない", () => {
+    const view = createView("```\n>本文\n```", 7);
+    expect(press(view, "Enter")).toBe(true);
+    expect(view.state.doc.toString()).toBe("```\n>本文\n\n```");
+  });
+
   it("Enterでリストを一度継続し、空項目の次のEnterで終了する", () => {
     const view = createView("- item");
 

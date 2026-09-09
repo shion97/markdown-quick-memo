@@ -300,7 +300,7 @@ describe("MarkdownQuickMemoApplication", () => {
     new MarkdownQuickMemoApplication(root);
     const editorElement = root.querySelector<HTMLElement>(".cm-editor");
     const view = EditorView.findFromDOM(editorElement!);
-    const source = "本文\n\n# 見出し1\n\n### 見出し3";
+    const source = "本文\n\n# 見出し1\n\n### 見出し3 $x^2$";
 
     view!.dispatch({ changes: { from: 0, insert: source } });
     vi.advanceTimersByTime(120);
@@ -308,11 +308,11 @@ describe("MarkdownQuickMemoApplication", () => {
     const outline = root.querySelector<HTMLElement>("#outline");
     const headings = root.querySelectorAll<HTMLButtonElement>(".outline-item");
     expect(outline?.hidden).toBe(false);
-    expect(Array.from(headings, (heading) => heading.textContent)).toEqual([
+    expect(Array.from(headings, (heading) => heading.title)).toEqual([
       "見出し1",
-      "見出し3",
+      "見出し3 $x^2$",
     ]);
-    headings[1]?.click();
+    headings[1]!.querySelector<HTMLElement>(".katex")!.click();
     expect(view?.state.selection.main.head).toBe(source.indexOf("###"));
     expect(view?.hasFocus).toBe(true);
   });

@@ -62,6 +62,43 @@ afterEach(() => {
 });
 
 describe("markdownDecorations", () => {
+  it.each(["- ", "1. ", "- [ ] ", "  - "])("%s直後の未確定入力を固定幅の要素に閉じ込めない", (prefix) => {
+    loadApplicationStyles();
+    const parent = renderDocument(prefix);
+    const view = views[views.length - 1]!;
+    view.contentDOM.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true }));
+    view.dispatch({ changes: { from: prefix.length, insert: "にほんご" }, selection: { anchor: prefix.length + 4 }, userEvent: "input.type.compose" });
+    const marker = parent.querySelector<HTMLElement>(".mqm-list-source-marker")!;
+    expect(marker.textContent).toBe(prefix.trimStart());
+    expect(window.getComputedStyle(marker).display).toBe("inline");
+    expect(marker.textContent).not.toContain("にほんご");
+    expect(view.state.doc.toString()).toBe(`${prefix}にほんご`);
+    view.contentDOM.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "にほんご" }));
+    view.dispatch({ changes: { from: prefix.length, to: view.state.doc.length, insert: "日本語" } });
+    expect(parent.querySelector(".mqm-list-source-marker")?.textContent).toBe(prefix.trimStart());
+  });
+
+  it("見出し1・2の下線を画面と印刷に定義し本文を変更しない", () => {
+    loadApplicationStyles();
+    const source = "# 見出し1\n## 見出し2\n### 見出し3";
+    for (const selection of [2, source.length]) {
+      renderDocument(source, selection);
+      expect(views[views.length - 1]!.state.doc.toString()).toBe(source);
+    }
+    const rules = Array.from(document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules));
+    const headingRules = rules.flatMap(rule => rule instanceof window.CSSMediaRule ? Array.from(rule.cssRules) : [rule])
+      .filter(rule => rule instanceof window.CSSStyleRule)
+      .filter(rule => rule.style.borderBottom === "1px solid var(--border)");
+    expect(headingRules.some(rule => rule.selectorText.replace(/\s+/g, " ") === ".mqm-heading-1, .mqm-heading-2")).toBe(true);
+    expect(headingRules.some(rule => rule.selectorText.includes(".print-root .mqm-heading-1") && rule.selectorText.includes(".print-root .mqm-heading-2"))).toBe(true);
+    expect(headingRules.some(rule => rule.selectorText.includes(".mqm-heading-3"))).toBe(false);
+  });
+
+  it("空の引用を装飾しコードフェンス内の引用は除外する", () => {
+    const parent = renderDocument(">\n>>\n\n```\n>本文\n```\n\n末尾");
+    expect(parent.querySelectorAll(".mqm-quote-line")).toHaveLength(2);
+  });
+
   it("報告されたMarkdown要素を編集用表示へ変換する", () => {
     const source = [
       "$$x^2 + y^2$$",
@@ -156,21 +193,17 @@ describe("markdownDecorations", () => {
       ".mqm-list-source-marker",
     )!;
     const decorated = renderDocument(source);
-    const decoratedMarker = decorated.querySelector<HTMLElement>(
-      ".mqm-list-marker",
-    )!;
+    expect(decorated.querySelector(".mqm-list-marker")).not.toBeNull();
 
     const inlineMath = editing.querySelector<HTMLElement>(".mqm-math-inline")!;
     expect(inlineMath.querySelector(".katex")).not.toBeNull();
     expect(window.getComputedStyle(inlineMath).textIndent).toBe("0px");
     expect(sourceMarker.textContent).toBe("- ");
-    expect(Number.parseFloat(window.getComputedStyle(sourceMarker).width)).toBe(
-      Number.parseFloat(window.getComputedStyle(decoratedMarker).width) +
-        Number.parseFloat(window.getComputedStyle(decoratedMarker).marginRight),
-    );
+    expect(window.getComputedStyle(sourceMarker).display).toBe("inline");
+    expect(editing.querySelector<HTMLElement>(".mqm-list-line-active")?.style.getPropertyValue("--mqm-list-source-width")).toBe("2ch");
   });
 
-  it("見出しへ下線を付けないクラスを適用する", () => {
+  it("見出しへレベル別のクラスを適用する", () => {
     const parent = renderDocument("# 見出し\n\nカーソル位置");
 
     expect(parent.querySelector(".mqm-heading-1")?.textContent).toBe("見出し");
@@ -409,14 +442,14 @@ describe("markdownDecorations", () => {
     expect(parent.querySelectorAll(".mqm-quote-marker")).toHaveLength(7);
   });
 
-  it("最後の引用記号直後に半角スペースがない行は装飾しない", () => {
+  it("半角スペースなしとタブ区切りの引用も装飾する", () => {
     const parent = renderDocument(
       ">本文\n>>>>本文\n>>>>\t本文\n> > > >本文\n>>>>- 項目\n\nカーソル位置",
     );
 
-    expect(parent.querySelector(".mqm-quote-line")).toBeNull();
-    expect(parent.querySelector(".mqm-quote-markers")).toBeNull();
-    expect(parent.querySelector(".mqm-list-line")).toBeNull();
+    expect(parent.querySelectorAll(".mqm-quote-line")).toHaveLength(5);
+    expect(parent.querySelectorAll(".mqm-quote-markers")).toHaveLength(5);
+    expect(parent.querySelectorAll(".mqm-list-line")).toHaveLength(1);
   });
 
   it("編集中の引用でも縦線とMarkdown原文を同時表示する", () => {

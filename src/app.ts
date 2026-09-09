@@ -18,6 +18,7 @@ import {
   buildOutlineTree,
   navigateToHeading,
   requestCompleteOutline,
+  renderOutlineLabel,
   type OutlineHeading,
   type OutlineNode,
 } from "./editor/outline";
@@ -755,7 +756,7 @@ export class MarkdownQuickMemoApplication {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "outline-item";
-      button.textContent = node.label;
+      button.append(renderOutlineLabel(node.label));
       button.dataset.headingPosition = String(node.position);
       button.dataset.outlineKey = node.key;
       button.title = node.label;

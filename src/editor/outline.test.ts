@@ -10,9 +10,30 @@ import {
   extractOutline,
   navigateToHeading,
   requestCompleteOutline,
+  renderOutlineLabel,
 } from "./outline";
 
 const views: EditorView[] = [];
+
+describe("renderOutlineLabel", () => {
+  it("通常文と複数の数式をインライン描画する", () => {
+    const target = document.createElement("div");
+    target.append(renderOutlineLabel("前 $x^2$ 中 $$y$$ 後"));
+    expect(target.querySelectorAll(".katex")).toHaveLength(2);
+    expect(target.querySelector(".katex-display")).toBeNull();
+    expect(target.textContent).toContain("前 ");
+    expect(target.textContent).toContain(" 後");
+  });
+
+  it("コードとエスケープを除外し不正な数式とHTMLを文字列で残す", () => {
+    const target = document.createElement("div");
+    const label = '`$code$` \\$escaped\\$ $\\invalidcommand$ <img src=x onerror=alert(1)>';
+    target.append(renderOutlineLabel(label));
+    expect(target.querySelector(".katex")).toBeNull();
+    expect(target.querySelector("img")).toBeNull();
+    expect(target.textContent).toBe(label);
+  });
+});
 
 function createState(source: string): EditorState {
   return EditorState.create({

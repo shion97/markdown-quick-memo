@@ -572,9 +572,12 @@ button.primary:active {
   word-break: break-all !important;
 }
 
+.mqm-list-line-active {
+  text-indent: calc(0px - var(--mqm-list-indent, 0ch) - var(--mqm-list-source-width, 0ch));
+}
+
 .mqm-list-source-marker {
-  display: inline-block;
-  width: 2.75em;
+  display: inline;
   text-indent: 0;
 }
 
@@ -847,6 +850,12 @@ button.primary:active {
   font-size: 1.72em;
 }
 
+.mqm-heading-1,
+.mqm-heading-2 {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25em !important;
+}
+
 .mqm-heading-2 {
   padding-top: 0.4em !important;
   font-size: 1.48em;
@@ -1039,6 +1048,12 @@ dialog::backdrop {
   .print-root .mqm-heading-1 {
     padding-top: 0.55em;
     font-size: 1.72em;
+  }
+
+  .print-root .mqm-heading-1,
+  .print-root .mqm-heading-2 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.25em;
   }
 
   .print-root .mqm-heading-2 {

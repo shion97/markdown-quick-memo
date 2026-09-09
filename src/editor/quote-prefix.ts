@@ -5,7 +5,7 @@ export interface QuotePrefix {
   depth: number;
 }
 
-const QUOTE_PREFIX_PATTERN = /^([ \t]*)((?:>[ \t]*)*> )(?![ \t]*>)/;
+const QUOTE_PREFIX_PATTERN = /^([ \t]*)((?:>[ \t]*)+)/;
 
 export function parseQuotePrefix(source: string): QuotePrefix | null {
   const match = QUOTE_PREFIX_PATTERN.exec(source);

@@ -607,8 +607,11 @@ function lineDecorations(
         to: line.from,
         decoration: Decoration.line({
           attributes: {
-            class: "mqm-list-line",
-            style: `--mqm-list-indent: ${visualIndent}ch`,
+            class: lineIsActive ? "mqm-list-line mqm-list-line-active" : "mqm-list-line",
+            style: [
+              `--mqm-list-indent: ${visualIndent}ch`,
+              `--mqm-list-source-width: ${(marker + list.spacing + (checkbox?.[0] ?? "")).replace(/\t/g, "  ").length}ch`,
+            ].join("; "),
           },
         }),
       });
@@ -639,7 +642,7 @@ function lineDecorations(
         results.push({
           from: markerFrom,
           to: checkbox ? markerTo + checkbox[0].length : markerTo,
-          decoration: Decoration.mark({ class: "mqm-list-source-marker" }),
+          decoration: Decoration.mark({ class: "mqm-list-source-marker", inclusive: false }),
         });
       }
     }
