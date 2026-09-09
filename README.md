@@ -146,7 +146,7 @@ pwsh -NoProfile -File .\scripts\verify.ps1
 
 ## releaseビルド
 
-Tauri本体、Rustランチャー、NSIS、MSIを作成します。
+Tauri本体、Rustランチャー、NSISインストーラーを作成します。通常のビルド対象は `src-tauri/tauri.conf.json` でNSISのみに設定しています。WiXの `light.exe` による生成失敗を避けるため、MSIは作成しません。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1
@@ -159,7 +159,6 @@ pwsh -NoProfile -File .\scripts\build.ps1
 - `dist\MarkdownQuickMemo\MarkdownQuickMemo.exe`
 - `dist\MarkdownQuickMemoHotkey\MarkdownQuickMemoHotkey.exe`
 - `src-tauri\target\release\bundle\nsis\Markdown Quick Memo_2.0.0_x64-setup.exe`
-- `src-tauri\target\release\bundle\msi\Markdown Quick Memo_2.0.0_x64_en-US.msi`
 
 ## ログオン登録
 
