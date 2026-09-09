@@ -719,6 +719,13 @@ button.primary:active {
   font: inherit;
 }
 
+.mqm-math-source,
+.mqm-math-source * {
+  color: inherit !important;
+  font: inherit !important;
+  text-decoration: none !important;
+}
+
 .mqm-math-display-source-line {
   background: var(--surface-muted);
 }

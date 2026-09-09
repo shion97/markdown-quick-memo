@@ -24,7 +24,11 @@ function overlapsProtected(
   to: number,
   protectedRanges: readonly ProtectedRange[],
 ): boolean {
-  return protectedRanges.some((range) => from < range.to && to > range.from);
+  return protectedRanges.some(
+    (range) =>
+      from < range.to && to > range.from &&
+      !(from < range.from && range.to < to),
+  );
 }
 
 export function findMathRanges(

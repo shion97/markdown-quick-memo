@@ -62,6 +62,25 @@ afterEach(() => {
 });
 
 describe("markdownDecorations", () => {
+  it.each([
+    "$[a](b) + <x> + a_b + c_d$",
+    "$$\n[a](b) + <x> + a_b + c_d\n$$",
+  ])("数式内の括弧をMarkdown装飾にせず入力と描画を維持する: %s", (formula) => {
+    const source = `${formula}\n\n通常の [リンク](https://example.com)`;
+    const parent = renderDocument(source, source.indexOf("a"));
+    expect(Array.from(parent.querySelectorAll(".mqm-math-source"), (element) => element.textContent).join("\n")).toBe(formula);
+    expect(parent.querySelector(".mqm-math-source .mqm-link-text")).toBeNull();
+    expect(parent.querySelector(".mqm-math-source .mqm-emphasis-content")).toBeNull();
+    expect(parent.querySelectorAll(".mqm-link-text")).toHaveLength(1);
+    expect(parent.querySelector(".katex")).not.toBeNull();
+    const view = views[views.length - 1]!;
+    view.dispatch({ changes: { from: source.indexOf("a"), insert: "z" } });
+    expect(Array.from(parent.querySelectorAll(".mqm-math-source"), (element) => element.textContent).join("\n")).toBe(formula.replace("a", "za"));
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    expect(parent.querySelector(".mqm-math-source")).toBeNull();
+    expect(parent.querySelector(".katex")).not.toBeNull();
+  });
+
   it.each(["- ", "1. ", "- [ ] ", "  - "])("%s直後の未確定入力を固定幅の要素に閉じ込めない", (prefix) => {
     loadApplicationStyles();
     const parent = renderDocument(prefix);

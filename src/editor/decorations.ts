@@ -933,16 +933,23 @@ export function buildDecorations(state: EditorState): DecorationSet {
   const entries: DecorationEntry[] = [];
   const segment = documentSegment(state);
 
-  entries.push(...lineDecorations(state, segment));
-  entries.push(...inlineMarkerDecorations(state, segment));
-  entries.push(...linkDecorations(state, segment));
-  entries.push(...fencedCodeDecorations(state, segment));
   const text = state.doc.sliceString(segment.from, segment.to);
   const mathRanges = findMathRanges(
     text,
     segment.from,
     protectedRanges(state, segment),
   );
+  const markdownEntries = [
+    ...lineDecorations(state, segment),
+    ...inlineMarkerDecorations(state, segment),
+    ...linkDecorations(state, segment),
+    ...fencedCodeDecorations(state, segment),
+  ];
+  entries.push(...markdownEntries.filter((entry) => !mathRanges.some((math) =>
+    entry.from === entry.to
+      ? math.from < entry.from && entry.from < math.to
+      : entry.from < math.to && entry.to > math.from && !entry.allowOverlap,
+  )));
   entries.push(...displayMathGapDecorations(state, mathRanges));
   for (const math of mathRanges) {
     if (editingTouches(state, math.from, math.to)) {
@@ -983,7 +990,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
       entries.push({
         from: math.from,
         to: math.to,
-        decoration: Decoration.mark({ class: "mqm-decoration-source" }),
+        decoration: Decoration.mark({ class: "mqm-decoration-source mqm-math-source" }),
       });
       continue;
     }
