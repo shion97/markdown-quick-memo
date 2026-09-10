@@ -15,6 +15,11 @@ describe("continuationForLine", () => {
 
   it("引用内リストを同じ階層で継続する", () => {
     expect(continuationForLine(">   - 項目", 8).inserted).toBe("\n>   - ");
+    const continuousQuoteList = ">>>> - 項目";
+    expect(
+      continuationForLine(continuousQuoteList, continuousQuoteList.length)
+        .inserted,
+    ).toBe("\n>>>> - ");
   });
 
   it("空の引用内リストを終了して引用階層だけを残す", () => {
@@ -62,10 +67,33 @@ describe("continuationForLine", () => {
       replacementTo: 6,
       inserted: "> > ",
     });
+    expect(continuationForLine(">>>> ", 5)).toEqual({
+      replacementFrom: 0,
+      replacementTo: 5,
+      inserted: ">>> ",
+    });
   });
 
   it("引用本文がある場合は同じ深度を次行へ継続する", () => {
     expect(continuationForLine("> > 本文", 6).inserted).toBe("\n> > ");
+    expect(continuationForLine(">>>> 本文", 7).inserted).toBe("\n>>>> ");
+  });
+
+  it("半角スペースがない引用と引用内リストも継続する", () => {
+    for (const [source, prefix] of [
+      [">本文", ">"],
+      [">>>>本文", ">>>>"],
+      [">>>>\t本文", ">>>>\t"],
+      ["> > > >本文", "> > > >"],
+      [">>>>- 項目", ">>>>- "],
+    ]) {
+      expect(continuationForLine(source!, source!.length).inserted).toBe(`\n${prefix}`);
+    }
+  });
+
+  it("スペースなしの空引用を一段ずつ終了する", () => {
+    expect(continuationForLine(">", 1)).toEqual({ replacementFrom: 0, replacementTo: 1, inserted: "" });
+    expect(continuationForLine(">>", 2)).toEqual({ replacementFrom: 0, replacementTo: 2, inserted: "> " });
   });
 });
 
@@ -81,10 +109,16 @@ describe("quoteSpaceDeletionForLine", () => {
       replacementTo: 6,
       inserted: "",
     });
+    expect(quoteSpaceDeletionForLine(">>>> ", 5)).toEqual({
+      replacementFrom: 4,
+      replacementTo: 5,
+      inserted: "",
+    });
   });
 
-  it("本文中やタブ末尾では専用削除を行わない", () => {
+  it("本文中や半角スペース以外の末尾では専用削除を行わない", () => {
     expect(quoteSpaceDeletionForLine("> 本文", 2)).toBeNull();
     expect(quoteSpaceDeletionForLine(">\t", 2)).toBeNull();
+    expect(quoteSpaceDeletionForLine(">>>>", 4)).toBeNull();
   });
 });

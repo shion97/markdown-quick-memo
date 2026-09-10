@@ -1,4 +1,6 @@
 import { forceParsing, syntaxTree } from "@codemirror/language";
+import { markdownLanguage } from "@codemirror/lang-markdown";
+import { findMathRanges, renderMath, type ProtectedRange } from "./math";
 import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
@@ -15,6 +17,33 @@ export interface OutlineNode extends OutlineHeading {
 
 const OUTLINE_PARSE_SLICE_MS = 30;
 const OUTLINE_PARSE_RETRY_MS = 16;
+
+export function renderOutlineLabel(label: string) {
+  const fragment = document.createDocumentFragment();
+  const protectedRanges: ProtectedRange[] = [];
+  markdownLanguage.parser.parse(label).iterate({
+    enter(node) {
+      if (node.name === "InlineCode") {
+        protectedRanges.push({ from: node.from, to: node.to });
+      }
+    },
+  });
+  let position = 0;
+  for (const range of findMathRanges(label, 0, protectedRanges)) {
+    fragment.append(document.createTextNode(label.slice(position, range.from)));
+    const math = document.createElement("span");
+    math.className = "mqm-math-inline";
+    try {
+      math.innerHTML = renderMath(range.expression, false);
+    } catch {
+      math.textContent = label.slice(range.from, range.to);
+    }
+    fragment.append(math);
+    position = range.to;
+  }
+  fragment.append(document.createTextNode(label.slice(position)));
+  return fragment;
+}
 
 export function extractOutline(state: EditorState): OutlineHeading[] {
   const headings: OutlineHeading[] = [];

@@ -33,6 +33,17 @@ describe("findMathRanges", () => {
     const expression = "x".repeat(MAX_MATH_INPUT_LENGTH + 1);
     expect(findMathRanges(`$${expression}$`)).toEqual([]);
   });
+
+  it("数式に完全に含まれるリンク風の範囲は数式の認識を妨げない", () => {
+    const source = "$[a](b) + <x>$";
+    expect(findMathRanges(source, 0, [{ from: 1, to: 7 }])).toHaveLength(1);
+  });
+
+  it.each(["`$x$`", "[label $x$](url)", "![label $x$](image)"])(
+    "数式を含むコード・リンク・画像は保護する: %s", (source) => {
+      expect(findMathRanges(source, 0, [{ from: 0, to: source.length }])).toEqual([]);
+    },
+  );
 });
 
 describe("renderMath", () => {

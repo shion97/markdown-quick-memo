@@ -82,7 +82,9 @@ describe("preparePrintDocument", () => {
       [
         "# 見出し",
         "",
-        "> 引用",
+        ">引用",
+        "",
+        "## 小見出し",
         "",
         "- [x] 完了",
         "- [ ] 未完了",
@@ -104,6 +106,7 @@ describe("preparePrintDocument", () => {
     );
 
     expect(target.querySelector("h1.mqm-heading-1")).not.toBeNull();
+    expect(target.querySelector("h2.mqm-heading-2")).not.toBeNull();
     expect(target.querySelector("blockquote.mqm-print-quote")).not.toBeNull();
     expect(target.querySelectorAll(".mqm-checkbox")).toHaveLength(2);
     expect(target.querySelector(".mqm-checkbox-checked")).not.toBeNull();

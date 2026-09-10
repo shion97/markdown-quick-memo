@@ -95,7 +95,7 @@ pnpm tauri dev
 
 ## Markdown表示
 
-- 見出し、太字、斜体、取り消し線、インラインコード、コードブロック、引用、リスト、チェックリスト、表、水平線、リンク、画像を装飾します。
+- 見出し、太字、斜体、取り消し線、インラインコード、コードブロック、引用、リスト、チェックリスト、表、水平線、リンク、画像を装飾します。引用は一番右側の`>`の直後に半角スペースがある場合だけ認識し、`>>>> `と`> > > > `のどちらの形式でもネストできます。
 - カーソルまたは選択範囲に重なる箇所は、見出しサイズ、表の枠、コード背景などの装飾を維持したまま、編集に必要なMarkdown記号だけを原文へ戻します。数式と水平線は装飾と原文を併記し、数式原文は通常本文と同じ字体で表示します。独立数式の原文は開始・本文・終了行を一続きの灰色ブロックで表示します。リスト記号は原文表示中も装飾時と同じ幅を確保し、リスト内のインライン数式を含む本文位置を維持します。
 - インラインコードとコードブロックは、背景や構文色を維持しながら通常本文と同じ字体で表示します。
 - 行全体を占める独立数式に空行が隣接する場合、Markdown原文を保持したまま上下各1行を表示上だけ折りたたみます。折りたたんだ行へカーソルまたは選択範囲を移すと再表示します。
@@ -122,7 +122,7 @@ pnpm tauri dev
 
 - 箇条書き、番号付きリスト、チェックリスト、引用をEnterで継続します。
 - 継続後の空項目で再度Enterを押すと、余分な空行を追加せず構造を終了します。
-- 空の引用ではEnterを押すたびに同じ行で1階層ずつ浅くなり、最浅階層では引用を終了します。引用接頭辞直後のBackspaceは末尾の半角スペースだけを削除します。
+- 空の引用ではEnterを押すたびに同じ行で1階層ずつ浅くなり、最浅階層では引用を終了します。引用接頭辞直後のBackspaceは末尾の半角スペースだけを削除し、Enterで継続するときは連続記号または空白区切りの入力形式を維持します。
 - 左右キーは装飾表示内でもMarkdown原文を一文字ずつ移動します。
 - `Tab`と`Shift + Tab`で字下げ・字上げします。通常行は半角スペース4個、リスト行は2個単位です。複数行選択時も行種別ごとに同じ単位を使います。
 - 行頭からカーソルまでが半角スペースだけの場合、`Backspace`は直前の最大4個をまとめて削除します。
@@ -146,7 +146,7 @@ pwsh -NoProfile -File .\scripts\verify.ps1
 
 ## releaseビルド
 
-Tauri本体、Rustランチャー、NSIS、MSIを作成します。
+Tauri本体、Rustランチャー、NSISインストーラーを作成します。通常のビルド対象は `src-tauri/tauri.conf.json` でNSISのみに設定しています。WiXの `light.exe` による生成失敗を避けるため、MSIは作成しません。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1
@@ -159,7 +159,6 @@ pwsh -NoProfile -File .\scripts\build.ps1
 - `dist\MarkdownQuickMemo\MarkdownQuickMemo.exe`
 - `dist\MarkdownQuickMemoHotkey\MarkdownQuickMemoHotkey.exe`
 - `src-tauri\target\release\bundle\nsis\Markdown Quick Memo_2.0.0_x64-setup.exe`
-- `src-tauri\target\release\bundle\msi\Markdown Quick Memo_2.0.0_x64_en-US.msi`
 
 ## ログオン登録
 

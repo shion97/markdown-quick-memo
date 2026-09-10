@@ -12,6 +12,7 @@ import {
   type MathRange,
   type ProtectedRange,
 } from "./math";
+import { parseQuotePrefix } from "./quote-prefix";
 
 class MathWidget extends WidgetType {
   constructor(
@@ -473,15 +474,15 @@ function orderedListNumber(
     if (text.trim() === "") {
       break;
     }
-    const match =
-      /^((?:[ \t]*>[ \t]?)*[ \t]*)\d+[.)][ \t]+/.exec(text);
+    const quote = parseQuotePrefix(text)?.text ?? "";
+    const match = /^([ \t]*)\d+[.)][ \t]+/.exec(text.slice(quote.length));
     if (!match) {
       if (/^\s*(?:[-+*])\s+/.test(text)) {
         continue;
       }
       break;
     }
-    if ((match[1] ?? "") === indentation) {
+    if (`${quote}${match[1] ?? ""}` === indentation) {
       count += 1;
     }
   }
@@ -489,8 +490,30 @@ function orderedListNumber(
 }
 
 function quoteDepth(lineText: string): number {
-  const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(lineText);
-  return (quote?.[2]?.match(/>/g) ?? []).length;
+  return parseQuotePrefix(lineText)?.depth ?? 0;
+}
+
+interface ListPrefix {
+  quote: string;
+  indent: string;
+  marker: string;
+  spacing: string;
+}
+
+function listPrefix(lineText: string): ListPrefix | null {
+  const quote = parseQuotePrefix(lineText)?.text ?? "";
+  const list = /^([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
+    lineText.slice(quote.length),
+  );
+  if (!list) {
+    return null;
+  }
+  return {
+    quote,
+    indent: list[1] ?? "",
+    marker: list[2] ?? "-",
+    spacing: list[3] ?? " ",
+  };
 }
 
 function lineDecorations(
@@ -568,17 +591,14 @@ function lineDecorations(
       continue;
     }
 
-    const list =
-      /^((?:[ \t]*>[ \t]?)*)([ \t]*)([-+*]|\d+[.)])([ \t]+)/.exec(
-        line.text,
-      );
+    const list = listPrefix(line.text);
     if (list) {
-      const quote = list[1] ?? "";
-      const indent = list[2] ?? "";
+      const quote = list.quote;
+      const indent = list.indent;
       const indentation = `${quote}${indent}`;
-      const marker = list[3] ?? "-";
+      const marker = list.marker;
       const markerFrom = line.from + indentation.length;
-      const markerTo = markerFrom + marker.length + (list[4]?.length ?? 1);
+      const markerTo = markerFrom + marker.length + list.spacing.length;
       const remainder = line.text.slice(markerTo - line.from);
       const checkbox = /^(\[[ xX]\])([ \t]+)/.exec(remainder);
       const visualIndent = indent.replace(/\t/g, "  ").length;
@@ -587,8 +607,11 @@ function lineDecorations(
         to: line.from,
         decoration: Decoration.line({
           attributes: {
-            class: "mqm-list-line",
-            style: `--mqm-list-indent: ${visualIndent}ch`,
+            class: lineIsActive ? "mqm-list-line mqm-list-line-active" : "mqm-list-line",
+            style: [
+              `--mqm-list-indent: ${visualIndent}ch`,
+              `--mqm-list-source-width: ${(marker + list.spacing + (checkbox?.[0] ?? "")).replace(/\t/g, "  ").length}ch`,
+            ].join("; "),
           },
         }),
       });
@@ -619,21 +642,21 @@ function lineDecorations(
         results.push({
           from: markerFrom,
           to: checkbox ? markerTo + checkbox[0].length : markerTo,
-          decoration: Decoration.mark({ class: "mqm-list-source-marker" }),
+          decoration: Decoration.mark({ class: "mqm-list-source-marker", inclusive: false }),
         });
       }
     }
-    const quote = /^([ \t]*)((?:>[ \t]?)+)/.exec(line.text);
+    const quote = parseQuotePrefix(line.text);
     if (quote) {
-      const markers = quote[2] ?? "";
-      const depth = quoteDepth(line.text);
+      const markers = quote.markers;
+      const depth = quote.depth;
       const previousDepth =
         lineNumber > 1 ? quoteDepth(document.line(lineNumber - 1).text) : 0;
       const nextDepth =
         lineNumber < document.lines
           ? quoteDepth(document.line(lineNumber + 1).text)
           : 0;
-      const from = line.from + (quote[1]?.length ?? 0);
+      const from = line.from + quote.indentation.length;
       const marker = new QuoteMarkerWidget(depth, previousDepth, nextDepth);
       results.push({
         from,
@@ -910,16 +933,23 @@ export function buildDecorations(state: EditorState): DecorationSet {
   const entries: DecorationEntry[] = [];
   const segment = documentSegment(state);
 
-  entries.push(...lineDecorations(state, segment));
-  entries.push(...inlineMarkerDecorations(state, segment));
-  entries.push(...linkDecorations(state, segment));
-  entries.push(...fencedCodeDecorations(state, segment));
   const text = state.doc.sliceString(segment.from, segment.to);
   const mathRanges = findMathRanges(
     text,
     segment.from,
     protectedRanges(state, segment),
   );
+  const markdownEntries = [
+    ...lineDecorations(state, segment),
+    ...inlineMarkerDecorations(state, segment),
+    ...linkDecorations(state, segment),
+    ...fencedCodeDecorations(state, segment),
+  ];
+  entries.push(...markdownEntries.filter((entry) => !mathRanges.some((math) =>
+    entry.from === entry.to
+      ? math.from < entry.from && entry.from < math.to
+      : entry.from < math.to && entry.to > math.from && !entry.allowOverlap,
+  )));
   entries.push(...displayMathGapDecorations(state, mathRanges));
   for (const math of mathRanges) {
     if (editingTouches(state, math.from, math.to)) {
@@ -960,7 +990,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
       entries.push({
         from: math.from,
         to: math.to,
-        decoration: Decoration.mark({ class: "mqm-decoration-source" }),
+        decoration: Decoration.mark({ class: "mqm-decoration-source mqm-math-source" }),
       });
       continue;
     }
