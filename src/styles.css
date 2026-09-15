@@ -758,6 +758,10 @@ button.primary:active {
   text-decoration: none !important;
 }
 
+.mqm-heading-content {
+  font-weight: bold;
+}
+
 .mqm-inline-code {
   padding: 0.12em 0.3em;
   border-radius: 0.28em;

@@ -42,7 +42,6 @@ export interface EditorCallbacks {
 
 const editorHighlightStyle = HighlightStyle.define([
   { tag: tags.link, textDecoration: "underline" },
-  { tag: tags.heading, fontWeight: "bold" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
