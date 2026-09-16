@@ -129,7 +129,7 @@ pub fn run() {
                 let state = window.state::<AppState>();
                 if !state.allow_close.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    if let Err(error) = workspace::request_exit(window.app_handle()) {
+                    if let Err(error) = workspace::request_window_close(window) {
                         log::error!("終了確認イベントを送信できませんでした: {error}");
                     }
                 }

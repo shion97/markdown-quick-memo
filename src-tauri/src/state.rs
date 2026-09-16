@@ -153,6 +153,7 @@ pub struct WorkspaceState {
     pub ready_windows: HashSet<String>,
     pub last_window: String,
     pub exit_pending: Vec<String>,
+    pub exit_target: Option<String>,
     pub exit_active: bool,
     pub dragging: bool,
 }

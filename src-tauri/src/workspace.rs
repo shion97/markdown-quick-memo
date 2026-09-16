@@ -2,7 +2,9 @@ use crate::state::{AppState, OpenDocument, Transfer, WorkspaceState};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
+};
 
 static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
 
@@ -178,6 +180,38 @@ fn show_exit_confirmation(app: &AppHandle, label: &str) -> Result<(), String> {
     window.emit_to(label, "check-exit", ()).map_err(|error| error.to_string())
 }
 
+fn begin_exit(
+    workspace: &mut WorkspaceState,
+    target: Option<&str>,
+) -> Result<Option<String>, String> {
+    if workspace.exit_active {
+        return Ok(None);
+    }
+    if workspace.dragging || !workspace.transfers.is_empty() {
+        return Err("タブの移動が終わってから終了してください。".into());
+    }
+    workspace.exit_pending = match target {
+        Some(label) if workspace.ready_windows.contains(label) => vec![label.into()],
+        Some(_) => return Err("終了するウィンドウが見つかりません。".into()),
+        None => {
+            let mut labels: Vec<_> = workspace.ready_windows.iter().cloned().collect();
+            labels.sort();
+            labels
+        }
+    };
+    workspace.exit_target = target.map(str::to_owned);
+    workspace.exit_active = true;
+    Ok(workspace.exit_pending.first().cloned())
+}
+
+fn emit_exit_lock(app: &AppHandle, target: Option<&str>, locked: bool) -> Result<(), String> {
+    match target {
+        Some(label) => app.emit_to(label, "exit-lock", locked),
+        None => app.emit("exit-lock", locked),
+    }
+    .map_err(|error| error.to_string())
+}
+
 pub fn request_exit(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let first = {
@@ -185,17 +219,40 @@ pub fn request_exit(app: &AppHandle) -> Result<(), String> {
         if workspace.exit_active {
             return Ok(());
         }
-        if workspace.dragging || !workspace.transfers.is_empty() {
-            return Err("タブの移動が終わってから終了してください。".into());
-        }
-        workspace.exit_pending = workspace.ready_windows.iter().cloned().collect();
-        workspace.exit_pending.sort();
-        workspace.exit_active = true;
-        workspace.exit_pending.first().cloned()
+        begin_exit(&mut workspace, None)?
     };
-    app.emit("exit-lock", true).map_err(|error| error.to_string())?;
+    emit_exit_lock(app, None, true)?;
     if let Some(label) = first {
         show_exit_confirmation(app, &label)?;
+    }
+    Ok(())
+}
+
+pub fn request_window_close(window: &Window) -> Result<(), String> {
+    let app = window.app_handle();
+    let state = window.state::<AppState>();
+    let close_application = state
+        .workspace
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ready_windows
+        .len()
+        <= 1;
+    if close_application {
+        return request_exit(app);
+    }
+
+    let label = window.label();
+    let first = {
+        let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+        if workspace.exit_active {
+            return Ok(());
+        }
+        begin_exit(&mut workspace, Some(label))?
+    };
+    emit_exit_lock(app, Some(label), true)?;
+    if first.is_some() {
+        show_exit_confirmation(app, label)?;
     }
     Ok(())
 }
@@ -207,7 +264,7 @@ pub fn exit_response(
     state: State<'_, AppState>,
     accepted: bool,
 ) -> Result<(), String> {
-    let next = {
+    let (next, target) = {
         let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
         if !workspace.exit_active
             || workspace
@@ -218,17 +275,45 @@ pub fn exit_response(
             return Ok(());
         }
         if !accepted {
+            let target = workspace.exit_target.take();
             workspace.exit_active = false;
             workspace.exit_pending.clear();
             drop(workspace);
-            app.emit("exit-lock", false).map_err(|error| error.to_string())?;
+            emit_exit_lock(&app, target.as_deref(), false)?;
             return Ok(());
         }
         workspace.exit_pending.remove(0);
-        workspace.exit_pending.first().cloned()
+        let next = workspace.exit_pending.first().cloned();
+        let target = if next.is_none() {
+            workspace.exit_target.take()
+        } else {
+            None
+        };
+        (next, target)
     };
     if let Some(label) = next {
         show_exit_confirmation(&app, &label)?;
+    } else if let Some(label) = target {
+        {
+            let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+            workspace
+                .documents
+                .retain(|_, document| document.window != label);
+            workspace.ready_windows.remove(&label);
+            workspace.exit_active = false;
+            if workspace.last_window == label {
+                workspace.last_window = workspace
+                    .ready_windows
+                    .iter()
+                    .next()
+                    .cloned()
+                    .unwrap_or_default();
+            }
+        }
+        app.get_webview_window(&label)
+            .ok_or("終了するウィンドウが見つかりません。")?
+            .destroy()
+            .map_err(|error| error.to_string())?;
     } else {
         state.allow_close.store(true, Ordering::SeqCst);
         app.exit(0);
@@ -673,5 +758,35 @@ mod tests {
             Path::new("C:\\Memo.md"),
             Path::new("c:\\memo.md")
         ));
+    }
+
+    #[test]
+    fn window_close_checks_only_the_requested_window() {
+        let mut workspace = WorkspaceState::default();
+        workspace
+            .ready_windows
+            .extend(["main".into(), "memo-1".into()]);
+
+        assert_eq!(
+            begin_exit(&mut workspace, Some("memo-1")).unwrap(),
+            Some("memo-1".into())
+        );
+        assert_eq!(workspace.exit_pending, ["memo-1"]);
+        assert_eq!(workspace.exit_target.as_deref(), Some("memo-1"));
+    }
+
+    #[test]
+    fn application_exit_checks_every_window() {
+        let mut workspace = WorkspaceState::default();
+        workspace
+            .ready_windows
+            .extend(["main".into(), "memo-1".into()]);
+
+        assert_eq!(
+            begin_exit(&mut workspace, None).unwrap(),
+            Some("main".into())
+        );
+        assert_eq!(workspace.exit_pending, ["main", "memo-1"]);
+        assert_eq!(workspace.exit_target, None);
     }
 }
