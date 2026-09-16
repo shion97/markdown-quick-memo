@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { undo } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownQuickMemoApplication } from "./app";
 import { backend, type TabTransfer } from "./bridge/tauri";
 import { serializeEditor, setPreviewOnly } from "./editor/editor";
 import type { RevisionTracker } from "./editor/revision";
+
+const styles = readFileSync("src/styles.css", "utf8");
 
 const dialogs = vi.hoisted(() => ({ ask: vi.fn(), message: vi.fn(), open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => dialogs);
@@ -57,6 +60,34 @@ afterEach(() => {
 });
 
 describe("複数文書のタブ", () => {
+  it("閉じるボタンを行内に重ね、ホバー時だけ表示する共通幅の水色サイドバーを使う", () => {
+    const { app, root } = application();
+    const first = app.activeTab;
+    app.createTab();
+
+    const firstRow = root.querySelector<HTMLElement>(
+      `[data-tab-id="${first.id}"]`,
+    )!;
+    expect(firstRow.querySelector(":scope > .tab-select")).not.toBeNull();
+    expect(firstRow.querySelector(":scope > .tab-close")).not.toBeNull();
+    expect(styles).toContain(
+      ".workspace { padding-left: var(--outline-width, 240px); }",
+    );
+    expect(styles).toContain(
+      "width: var(--outline-width, 240px);",
+    );
+    expect(styles).toContain("background: var(--tabs-background);");
+    expect(styles).toContain(
+      "border-color: transparent; background: transparent; opacity: 0; pointer-events: none;",
+    );
+    expect(styles).toContain(
+      ".tab-row:hover .tab-close,\n.tab-row:focus-within .tab-close { opacity: 1; pointer-events: auto; }",
+    );
+    expect(styles).toContain(
+      ".tab-row:hover .tab-select,\n.tab-row:focus-within .tab-select { background: var(--surface-raised); }",
+    );
+  });
+
   it("Ctrl+Shift+Nで下に追加し、Ctrl+Kと上下キーで本文を切り替え、Enterで編集へ戻る", async () => {
     const { app, root } = application();
     edit(app.activeTab, "一つ目");

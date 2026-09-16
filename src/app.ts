@@ -34,7 +34,6 @@ const OUTLINE_MIN_WIDTH = 240;
 const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
 const AUTO_SAVE_DELAY_MS = 1_000;
-const TAB_PANEL_WIDTH = 240;
 const MIN_EDITOR_WIDTH = 560;
 
 function fileName(path: string | null): string {
@@ -1290,7 +1289,7 @@ export class MarkdownQuickMemoApplication {
   private updateTabPanel(): void {
     const fixedOutline = !this.outline.hidden && window.getComputedStyle(this.outline).position === "static"
       ? this.outlineWidth : 0;
-    this.workspace.classList.toggle("tabs-collapsed", this.workspace.clientWidth - fixedOutline - TAB_PANEL_WIDTH < MIN_EDITOR_WIDTH);
+    this.workspace.classList.toggle("tabs-collapsed", this.workspace.clientWidth - fixedOutline - this.outlineWidth < MIN_EDITOR_WIDTH);
   }
 
   private updateOutlineWidth(delta: number): void {
