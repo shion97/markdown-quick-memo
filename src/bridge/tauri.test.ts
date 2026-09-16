@@ -15,9 +15,10 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: tauriMocks.listen,
 }));
 
-import { backend, invokeWithBackendPayload } from "./tauri";
+import { backend, configureBackendEvents, invokeWithBackendPayload, onBackendPayload } from "./tauri";
 
 afterEach(() => {
+  configureBackendEvents(undefined);
   vi.useRealTimers();
   vi.clearAllMocks();
 });
@@ -79,6 +80,28 @@ describe("invokeWithBackendPayload", () => {
 });
 
 describe("backend", () => {
+  it("文書の保存に文書IDと保存先を明示する", async () => {
+    tauriMocks.invoke.mockResolvedValue({ path: "C:\\memo.md", revision: 2 });
+    await backend.saveDocument("本文", 2, "C:\\memo.md", "document-2");
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("save_document", {
+      documentId: "document-2", content: "本文", revision: 2, path: "C:\\memo.md",
+    });
+  });
+
+  it("タブ受け渡しとPDF完了は自分のウィンドウ宛のイベントだけを購読する", async () => {
+    configureBackendEvents("memo-2");
+    tauriMocks.listen.mockResolvedValue(vi.fn());
+    await onBackendPayload("receive-tab", vi.fn());
+    expect(tauriMocks.listen).toHaveBeenCalledWith("receive-tab", expect.any(Function), { target: "memo-2" });
+    let deliver!: (event: { payload: string }) => void;
+    tauriMocks.listen.mockImplementation(async (_event: string, handler: typeof deliver) => {
+      deliver = handler;
+      return vi.fn();
+    });
+    await invokeWithBackendPayload("pdf-export-completed", 1000, async () => { deliver({ payload: "完了" }); });
+    expect(tauriMocks.listen).toHaveBeenLastCalledWith("pdf-export-completed", expect.any(Function), { target: "memo-2" });
+  });
+
   it("コピー文字列をcopy_textコマンドへ渡す", async () => {
     tauriMocks.invoke.mockResolvedValue(undefined);
 

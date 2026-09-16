@@ -4,13 +4,14 @@ use crate::launcher_protocol;
 use crate::lifecycle::show_main_window;
 use crate::pdf::{self, PdfTarget};
 use crate::state::{AppState, HotkeyStatus};
+use crate::workspace::{document_path, set_document_path};
 use base64::Engine;
 use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State, WebviewWindow};
 use url::Url;
 
 const MAX_PREVIEW_BYTES: u64 = 20 * 1024 * 1024;
@@ -25,6 +26,7 @@ pub struct DocumentPayload {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapPayload {
+    pub window_label: String,
     pub background: bool,
     pub document: Option<DocumentPayload>,
     pub hotkey: HotkeyStatus,
@@ -41,25 +43,23 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn set_current_path(state: &AppState, path: PathBuf) -> Result<(), String> {
-    *state
-        .current_file
-        .lock()
-        .map_err(|_| "現在のファイル状態を更新できません。".to_string())? = Some(path);
-    Ok(())
-}
-
 #[tauri::command]
-pub fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, String> {
-    let startup_path = state
-        .startup_file
-        .lock()
-        .map_err(|_| "起動ファイル状態を取得できません。".to_string())?
-        .take();
+pub fn bootstrap(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<BootstrapPayload, String> {
+    let startup_path = if window.label() == "main" {
+        state
+            .startup_file
+            .lock()
+            .map_err(|_| "起動ファイル状態を取得できません。".to_string())?
+            .take()
+    } else {
+        None
+    };
     let document = match startup_path {
         Some(path) => {
             let content = read_markdown(&path).map_err(|error| error.to_string())?;
-            set_current_path(&state, path.clone())?;
             Some(DocumentPayload {
                 path: path_string(&path),
                 content,
@@ -76,6 +76,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, String>
         status.clone()
     };
     Ok(BootstrapPayload {
+        window_label: window.label().into(),
         background: state.background,
         document,
         hotkey,
@@ -83,20 +84,36 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, String>
 }
 
 #[tauri::command]
-pub fn frontend_ready(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub fn frontend_ready(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .workspace
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ready_windows
+        .insert(window.label().into());
     state.ready.store(true, Ordering::SeqCst);
     log::info!("CodeMirrorの初期化が完了しました");
-    if state.should_show_after_ready() {
+    if window.label() == "main" && state.should_show_after_ready() {
         show_main_window(&app)?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn open_document(path: String, state: State<'_, AppState>) -> Result<DocumentPayload, String> {
+pub fn open_document(
+    path: String,
+    document_id: String,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<DocumentPayload, String> {
+    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
     let path = PathBuf::from(path);
     let content = read_markdown(&path).map_err(|error| error.to_string())?;
-    set_current_path(&state, path.clone())?;
+    set_document_path(&state, &window, &document_id, Some(path.clone()))?;
     Ok(DocumentPayload {
         path: path_string(&path),
         content,
@@ -105,22 +122,23 @@ pub fn open_document(path: String, state: State<'_, AppState>) -> Result<Documen
 
 #[tauri::command]
 pub fn save_document(
+    document_id: String,
+    window: WebviewWindow,
     path: Option<String>,
     content: String,
     revision: u64,
     state: State<'_, AppState>,
 ) -> Result<SaveResult, String> {
+    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
     let requested = match path {
         Some(path) => PathBuf::from(path),
-        None => state
-            .current_file
-            .lock()
-            .map_err(|_| "現在のファイル状態を取得できません。".to_string())?
-            .clone()
+        None => document_path(&state, &window, &document_id)?
             .ok_or_else(|| "保存先が指定されていません。".to_string())?,
     };
+    let requested = ensure_markdown_suffix(&requested);
+    crate::workspace::check_destination(&state, &window, &document_id, &requested)?;
     let saved = write_markdown(&requested, &content).map_err(|error| error.to_string())?;
-    set_current_path(&state, saved.clone())?;
+    set_document_path(&state, &window, &document_id, Some(saved.clone()))?;
     Ok(SaveResult {
         path: path_string(&saved),
         revision,
@@ -130,8 +148,11 @@ pub fn save_document(
 #[tauri::command]
 pub fn rename_document(
     new_name: String,
+    document_id: String,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<DocumentPayload, String> {
+    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
     if new_name.trim().is_empty()
         || Path::new(&new_name)
             .components()
@@ -139,11 +160,7 @@ pub fn rename_document(
     {
         return Err("ファイル名だけを入力してください。".to_string());
     }
-    let current = state
-        .current_file
-        .lock()
-        .map_err(|_| "現在のファイル状態を取得できません。".to_string())?
-        .clone()
+    let current = document_path(&state, &window, &document_id)?
         .ok_or_else(|| "名前を変更するファイルがありません。".to_string())?;
     let parent = current
         .parent()
@@ -160,9 +177,10 @@ pub fn rename_document(
     if destination.exists() {
         return Err("同名のファイルが既に存在します。".to_string());
     }
+    crate::workspace::check_destination(&state, &window, &document_id, &destination)?;
     fs::rename(&current, &destination).map_err(|error| error.to_string())?;
     let content = read_markdown(&destination).map_err(|error| error.to_string())?;
-    set_current_path(&state, destination.clone())?;
+    set_document_path(&state, &window, &document_id, Some(destination.clone()))?;
     Ok(DocumentPayload {
         path: path_string(&destination),
         content,
@@ -170,12 +188,12 @@ pub fn rename_document(
 }
 
 #[tauri::command]
-pub fn reveal_document(state: State<'_, AppState>) -> Result<(), String> {
-    let current = state
-        .current_file
-        .lock()
-        .map_err(|_| "現在のファイル状態を取得できません。".to_string())?
-        .clone()
+pub fn reveal_document(
+    document_id: String,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let current = document_path(&state, &window, &document_id)?
         .ok_or_else(|| "保存済みファイルがありません。".to_string())?;
     #[cfg(windows)]
     {
@@ -198,16 +216,14 @@ pub fn reveal_document(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn local_image_data(
     relative_path: String,
+    document_id: String,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     if relative_path.starts_with("http://") || relative_path.starts_with("https://") {
         return Err("外部画像URLは取得しません。".to_string());
     }
-    let current = state
-        .current_file
-        .lock()
-        .map_err(|_| "現在のファイル状態を取得できません。".to_string())?
-        .clone();
+    let current = document_path(&state, &window, &document_id)?;
     let base = current
         .as_deref()
         .and_then(Path::parent)
@@ -232,17 +248,13 @@ pub fn local_image_data(
 }
 
 #[tauri::command]
-pub fn hide_window(app: AppHandle) -> Result<(), String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "メインウィンドウが見つかりません。".to_string())?
-        .hide()
-        .map_err(|error| error.to_string())
+pub fn hide_window(window: WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn confirm_exit(app: AppHandle, state: State<'_, AppState>) {
-    state.allow_close.store(true, Ordering::SeqCst);
-    app.exit(0);
+pub fn confirm_exit(app: AppHandle) -> Result<(), String> {
+    crate::workspace::request_exit(&app)
 }
 
 #[tauri::command]
@@ -267,18 +279,26 @@ pub fn update_hotkey(shortcut: String, state: State<'_, AppState>) -> Result<Hot
 }
 
 #[tauri::command]
-pub fn pdf_target(app: AppHandle) -> Result<PdfTarget, String> {
-    pdf::target(&app)
+pub fn pdf_target(window: WebviewWindow, document_id: String) -> Result<PdfTarget, String> {
+    pdf::target(&window, &document_id)
 }
 
 #[tauri::command]
-pub fn export_pdf(app: AppHandle, output_path: String) -> Result<String, String> {
-    pdf::start_export(&app, Path::new(&output_path))
+pub fn export_pdf(
+    window: WebviewWindow,
+    document_id: String,
+    output_path: String,
+) -> Result<String, String> {
+    pdf::start_export(&window, &document_id, Path::new(&output_path))
 }
 
 #[tauri::command]
-pub fn open_pdf(app: AppHandle, output_path: String) -> Result<(), String> {
-    pdf::open_output(&app, Path::new(&output_path))
+pub fn open_pdf(
+    window: WebviewWindow,
+    document_id: String,
+    output_path: String,
+) -> Result<(), String> {
+    pdf::open_output(&window, &document_id, Path::new(&output_path))
 }
 
 #[tauri::command]
@@ -316,7 +336,7 @@ pub fn open_external_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_window_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
+pub fn set_window_opacity(window: WebviewWindow, opacity: f64) -> Result<(), String> {
     if !(0.2..=1.0).contains(&opacity) {
         return Err("不透明度は20%から100%の範囲で指定してください。".to_string());
     }
@@ -327,9 +347,6 @@ pub fn set_window_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
             WS_EX_LAYERED,
         };
 
-        let window = app
-            .get_webview_window("main")
-            .ok_or_else(|| "メインウィンドウが見つかりません。".to_string())?;
         let hwnd = window.hwnd().map_err(|error| error.to_string())?.0;
         let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
         unsafe {

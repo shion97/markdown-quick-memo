@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::fs;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{Emitter, Manager, WebviewWindow};
 use tempfile::Builder;
 use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_7, ICoreWebView2Environment6};
 use webview2_com::PrintToPdfCompletedHandler;
@@ -25,17 +25,17 @@ struct PdfExportCompleted {
     error: Option<String>,
 }
 
-fn current_markdown(app: &AppHandle) -> Result<PathBuf, String> {
-    app.state::<AppState>()
-        .current_file
-        .lock()
-        .map_err(|_| "現在のファイル状態を取得できません。".to_string())?
-        .clone()
+fn current_markdown(window: &WebviewWindow, document_id: &str) -> Result<PathBuf, String> {
+    crate::workspace::document_path(&window.state::<AppState>(), window, document_id)?
         .ok_or_else(|| "先にMarkdownファイルを保存してください。".to_string())
 }
 
-fn validate_output(app: &AppHandle, requested: &Path) -> Result<PathBuf, String> {
-    let markdown = current_markdown(app)?;
+fn validate_output(
+    window: &WebviewWindow,
+    document_id: &str,
+    requested: &Path,
+) -> Result<PathBuf, String> {
+    let markdown = current_markdown(window, document_id)?;
     let expected = markdown.with_extension("pdf");
     if requested != expected {
         return Err("PDFはMarkdownファイルと同じ場所・同じ名前で出力してください。".to_string());
@@ -43,16 +43,20 @@ fn validate_output(app: &AppHandle, requested: &Path) -> Result<PathBuf, String>
     Ok(expected)
 }
 
-pub fn target(app: &AppHandle) -> Result<PdfTarget, String> {
-    let path = current_markdown(app)?.with_extension("pdf");
+pub fn target(window: &WebviewWindow, document_id: &str) -> Result<PdfTarget, String> {
+    let path = current_markdown(window, document_id)?.with_extension("pdf");
     Ok(PdfTarget {
         path: path.to_string_lossy().into_owned(),
         exists: path.exists(),
     })
 }
 
-pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String> {
-    let output = validate_output(app, requested)?;
+pub fn start_export(
+    window: &WebviewWindow,
+    document_id: &str,
+    requested: &Path,
+) -> Result<String, String> {
+    let output = validate_output(window, document_id, requested)?;
     let parent = output
         .parent()
         .ok_or_else(|| "PDF出力先のフォルダを取得できません。".to_string())?;
@@ -66,12 +70,9 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
 
     let output_for_callback = output.clone();
     let temporary_for_callback = temporary_path.clone();
-    let app_for_callback = app.clone();
+    let app_for_callback = window.clone();
     let output_label = output.to_string_lossy().into_owned();
     let output_for_result = output_label.clone();
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "メインWebViewが見つかりません。".to_string())?;
 
     window
         .with_webview(move |webview| {
@@ -122,7 +123,11 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
                         if !completion.success {
                             let _ = fs::remove_file(&temporary_for_callback);
                         }
-                        let _ = app_on_complete.emit("pdf-export-completed", completion);
+                        let _ = app_on_complete.emit_to(
+                            app_on_complete.label(),
+                            "pdf-export-completed",
+                            completion,
+                        );
                         Ok(())
                     },
                 ));
@@ -138,7 +143,8 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
 
             if let Err(error) = result {
                 let _ = fs::remove_file(&temporary_path);
-                let _ = app_for_callback.emit(
+                let _ = app_for_callback.emit_to(
+                    app_for_callback.label(),
                     "pdf-export-completed",
                     PdfExportCompleted {
                         output_path: output_for_result,
@@ -152,8 +158,12 @@ pub fn start_export(app: &AppHandle, requested: &Path) -> Result<String, String>
     Ok(output.to_string_lossy().into_owned())
 }
 
-pub fn open_output(app: &AppHandle, requested: &Path) -> Result<(), String> {
-    let output = validate_output(app, requested)?;
+pub fn open_output(
+    window: &WebviewWindow,
+    document_id: &str,
+    requested: &Path,
+) -> Result<(), String> {
+    let output = validate_output(window, document_id, requested)?;
     if !output.exists() {
         return Err("PDFファイルが見つかりません。".to_string());
     }

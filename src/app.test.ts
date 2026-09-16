@@ -184,6 +184,9 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(menuActions).toEqual([
       "new",
       "open",
+      "new-tab",
+      "open-tab",
+      "close-tab",
       "save",
       "save-as",
       "rename",
@@ -804,7 +807,7 @@ describe("MarkdownQuickMemoApplication", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(saveDocument).toHaveBeenCalledOnce();
-    expect(saveDocument).toHaveBeenCalledWith("初期更新", 1, undefined);
+    expect(saveDocument).toHaveBeenCalledWith("初期更新", 1, path, expect.any(String));
     expect(root.querySelector("#document-title")?.textContent).toBe("memo.md");
   });
 
@@ -885,7 +888,7 @@ describe("MarkdownQuickMemoApplication", () => {
 
     view.dispatch({ changes: { from: view.state.doc.length, insert: "1" } });
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(saveDocument).toHaveBeenCalledWith("初期1", 1, undefined);
+    expect(saveDocument).toHaveBeenCalledWith("初期1", 1, path, expect.any(String));
 
     view.dispatch({ changes: { from: view.state.doc.length, insert: "2" } });
     await vi.advanceTimersByTimeAsync(1_000);
@@ -896,7 +899,7 @@ describe("MarkdownQuickMemoApplication", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(saveDocument).toHaveBeenCalledTimes(2);
-    expect(saveDocument).toHaveBeenLastCalledWith("初期12", 2, undefined);
+    expect(saveDocument).toHaveBeenLastCalledWith("初期12", 2, path, expect.any(String));
   });
 
   it("自動保存失敗時は未保存状態を保ち、入力なしでは再試行しない", async () => {

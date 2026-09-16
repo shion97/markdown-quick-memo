@@ -5,6 +5,7 @@ mod launcher_protocol;
 mod lifecycle;
 mod pdf;
 mod state;
+mod workspace;
 
 use crate::lifecycle::request_show;
 use crate::state::{AppState, LaunchOptions};
@@ -24,9 +25,15 @@ pub fn run() {
                 {
                     let state = app.state::<AppState>();
                     if state.ready.load(Ordering::SeqCst) {
-                        if let Err(error) =
-                            app.emit("open-file-requested", path.to_string_lossy().into_owned())
-                        {
+                        if let Err(error) = app.emit_to(
+                            state
+                                .workspace
+                                .lock()
+                                .map(|workspace| workspace.last_window.clone())
+                                .unwrap_or_else(|_| "main".into()),
+                            "open-file-requested",
+                            path.to_string_lossy().into_owned(),
+                        ) {
                             log::error!("ファイル起動要求を送信できませんでした: {error}");
                         }
                     } else if let Ok(mut startup_file) = state.startup_file.lock() {
@@ -59,6 +66,18 @@ pub fn run() {
         )
         .manage(state)
         .invoke_handler(tauri::generate_handler![
+            workspace::register_document,
+            workspace::clear_document,
+            workspace::release_document,
+            workspace::focus_existing,
+            workspace::exit_response,
+            workspace::drag_tab,
+            workspace::transfer_tab,
+            workspace::pending_transfer,
+            workspace::transfer_status,
+            workspace::cancel_transfer,
+            workspace::accept_transfer,
+            workspace::close_empty_window,
             commands::bootstrap,
             commands::frontend_ready,
             commands::open_document,
@@ -88,11 +107,29 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Destroyed = event {
+                if let Ok(mut workspace) = window.state::<AppState>().workspace.lock() {
+                    workspace.ready_windows.remove(window.label());
+                    if workspace.last_window == window.label() {
+                        workspace.last_window = workspace
+                            .ready_windows
+                            .iter()
+                            .next()
+                            .cloned()
+                            .unwrap_or_default();
+                    }
+                }
+            }
+            if let WindowEvent::Focused(true) = event {
+                if let Ok(mut workspace) = window.state::<AppState>().workspace.lock() {
+                    workspace.last_window = window.label().into();
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
                 if !state.allow_close.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    if let Err(error) = window.emit("close-requested", ()) {
+                    if let Err(error) = workspace::request_exit(window.app_handle()) {
                         log::error!("終了確認イベントを送信できませんでした: {error}");
                     }
                 }

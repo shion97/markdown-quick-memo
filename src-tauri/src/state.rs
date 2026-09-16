@@ -1,4 +1,5 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -130,10 +131,36 @@ impl HotkeyStatus {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OpenDocument {
+    pub window: String,
+    pub path: Option<PathBuf>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Transfer {
+    pub id: String,
+    pub document_id: String,
+    pub source: String,
+    pub target: String,
+    pub snapshot: serde_json::Value,
+    pub index: usize,
+}
+#[derive(Default)]
+pub struct WorkspaceState {
+    pub documents: HashMap<String, OpenDocument>,
+    pub transfers: HashMap<String, Transfer>,
+    pub ready_windows: HashSet<String>,
+    pub last_window: String,
+    pub exit_pending: Vec<String>,
+    pub exit_active: bool,
+    pub dragging: bool,
+}
 pub struct AppState {
     pub background: bool,
     pub startup_file: Mutex<Option<PathBuf>>,
-    pub current_file: Mutex<Option<PathBuf>>,
+    pub workspace: Mutex<WorkspaceState>,
+    pub document_io: Mutex<()>,
     pub hotkey: Mutex<HotkeyStatus>,
     pub ready: AtomicBool,
     pub pending_show: AtomicBool,
@@ -145,7 +172,11 @@ impl AppState {
         Self {
             background: options.background,
             startup_file: Mutex::new(options.startup_file),
-            current_file: Mutex::new(None),
+            document_io: Mutex::new(()),
+            workspace: Mutex::new(WorkspaceState {
+                last_window: "main".into(),
+                ..Default::default()
+            }),
             hotkey: Mutex::new(HotkeyStatus::initial(
                 options.hotkey_triggered,
                 options.hotkey_error,

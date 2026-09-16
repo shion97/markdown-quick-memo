@@ -20,6 +20,15 @@ export class RevisionTracker {
     this.savedRevision = 0;
   }
 
+  snapshot(): [number, number] {
+    return [this.currentRevision, this.savedRevision];
+  }
+
+  restore([current, saved]: [number, number]): void {
+    this.currentRevision = current;
+    this.savedRevision = saved;
+  }
+
   acceptSavedRevision(revision: number): boolean {
     if (revision !== this.currentRevision) {
       return false;
