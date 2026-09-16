@@ -693,12 +693,27 @@ function lineDecorations(
 function inlineMarkerDecorations(
   state: EditorState,
   segment: DocumentSegment,
+  mathRanges: readonly MathRange[],
 ): DecorationEntry[] {
   const results: DecorationEntry[] = [];
   syntaxTree(state).iterate({
     from: segment.from,
     to: segment.to,
     enter: (node) => {
+      if (/^(?:ATXHeading[1-6]|SetextHeading[12])$/.test(node.name)) {
+        const marker = node.node.getChild("HeaderMark");
+        // 数式内の = や --- を見出し記号と誤認した場合、前の本文も太字にしない。
+        if (marker && !mathRanges.some((math) =>
+          marker.from < math.to && marker.to > math.from,
+        )) {
+          results.push({
+            from: node.from,
+            to: node.to,
+            decoration: Decoration.mark({ class: "mqm-heading-content" }),
+            allowOverlap: true,
+          });
+        }
+      }
       if (
         node.name === "Emphasis" &&
         node.to - node.from > 2
@@ -941,7 +956,7 @@ export function buildDecorations(state: EditorState): DecorationSet {
   );
   const markdownEntries = [
     ...lineDecorations(state, segment),
-    ...inlineMarkerDecorations(state, segment),
+    ...inlineMarkerDecorations(state, segment, mathRanges),
     ...linkDecorations(state, segment),
     ...fencedCodeDecorations(state, segment),
   ];
