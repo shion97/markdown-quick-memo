@@ -611,13 +611,40 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(workspace?.style.getPropertyValue("--outline-width")).toBe("440px");
   });
 
-  it("Ctrlと左右キーで目次幅を変更し、入力欄では横移動を維持する", () => {
+  it("Ctrl+L中だけ左右キーで目次幅を変更し、通常編集と入力欄では横移動を維持する", () => {
+    vi.useFakeTimers();
     const root = document.createElement("div");
     document.body.append(root);
     new MarkdownQuickMemoApplication(root);
     const workspace = root.querySelector<HTMLElement>("#workspace")!;
     const editorContent = root.querySelector<HTMLElement>(".cm-content")!;
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
     const hotkeyInput = root.querySelector<HTMLInputElement>("#hotkey-input")!;
+
+    const normalEvent = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    let preventedByApplication = true;
+    editorContent.addEventListener(
+      "keydown",
+      (event) => { preventedByApplication = event.defaultPrevented; },
+      { capture: true, once: true },
+    );
+    editorContent.dispatchEvent(normalEvent);
+    expect(preventedByApplication).toBe(false);
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+
+    view.dispatch({ changes: { from: 0, insert: "# 見出し" } });
+    vi.advanceTimersByTime(120);
+    editorContent.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "l",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
 
     const expandEvent = new KeyboardEvent("keydown", {
       key: "ArrowLeft",
@@ -628,6 +655,7 @@ describe("MarkdownQuickMemoApplication", () => {
     editorContent.dispatchEvent(expandEvent);
     expect(expandEvent.defaultPrevented).toBe(true);
     expect(workspace.style.getPropertyValue("--outline-width")).toBe("280px");
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("240px");
 
     editorContent.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -638,6 +666,13 @@ describe("MarkdownQuickMemoApplication", () => {
       }),
     );
     expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+
+    editorContent.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "l",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
 
     hotkeyInput.dispatchEvent(
       new KeyboardEvent("keydown", {

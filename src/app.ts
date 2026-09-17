@@ -35,6 +35,7 @@ const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
 const AUTO_SAVE_DELAY_MS = 1_000;
 const MIN_EDITOR_WIDTH = 560;
+const TABS_PINNED_STORAGE_KEY = "markdown-quick-memo:tabs-pinned";
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -90,6 +91,7 @@ export class MarkdownQuickMemoApplication {
   private initialized = false;
   private windowLabel = "main";
   private tabsNavigationActive = false;
+  private tabsPinned = true;
   private operationPending = false;
   private exitLocked = false;
   private transferring: DocumentTab | null = null;
@@ -116,11 +118,13 @@ export class MarkdownQuickMemoApplication {
   private suppressChanges = false;
   private translucent = false;
   private outlineWidth = OUTLINE_MIN_WIDTH;
+  private tabsWidth = OUTLINE_MIN_WIDTH;
   private outlineNavigationActive = false;
   private selectedOutlineKey: string | null = null;
   private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
+    this.tabsPinned = this.loadTabsPinned();
     this.root.innerHTML = this.layout();
     this.editorHost = this.required("#editor");
     this.workspace = this.required("#workspace");
@@ -136,7 +140,37 @@ export class MarkdownQuickMemoApplication {
     this.hotkeyStatus = this.required("#hotkey-status");
     this.createTab();
     this.bindActions();
+    this.updateTabsPinned();
+    this.updateTabsWidth(0);
     this.updateOutlineWidth(0);
+  }
+
+  private loadTabsPinned(): boolean {
+    try {
+      return window.localStorage.getItem(TABS_PINNED_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  }
+
+  private updateTabsPinned(): void {
+    this.workspace.classList.toggle("tabs-unpinned", !this.tabsPinned);
+    const button = this.required<HTMLButtonElement>("button[data-action='toggle-tabs-pin']");
+    const label = this.tabsPinned ? "タブ帯のピン止めを外す" : "タブ帯をピン止めする";
+    button.setAttribute("aria-pressed", String(this.tabsPinned));
+    button.setAttribute("aria-label", label);
+    button.title = label;
+  }
+
+  private toggleTabsPinned(): void {
+    this.tabsPinned = !this.tabsPinned;
+    try {
+      window.localStorage.setItem(TABS_PINNED_STORAGE_KEY, String(this.tabsPinned));
+    } catch {
+      // Storage can be unavailable in restricted webview contexts; keep the in-memory state.
+    }
+    this.updateTabsPinned();
+    if (!this.tabsPinned) this.editor.focus();
   }
 
   private createTab(id: string = window.crypto.randomUUID()): DocumentTab {
@@ -547,7 +581,9 @@ export class MarkdownQuickMemoApplication {
               <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
               <div class="shortcut-row"><span>タブを操作 / 編集へ戻る</span><kbd>Ctrl+K</kbd></div>
               <div class="shortcut-row"><span>タブを移動</span><kbd>Ctrl+↑ / Ctrl+↓</kbd></div>
+              <div class="shortcut-row"><span>タブ幅を縮小 / 拡大</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
               <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
+              <div class="shortcut-row"><span>目次幅を拡大 / 縮小</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
               <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+H</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
@@ -557,7 +593,14 @@ export class MarkdownQuickMemoApplication {
         </header>
         <section id="workspace" class="workspace">
           <aside id="tabs" class="tabs-panel" aria-label="タブ">
-            <h2>タブ</h2>
+            <header class="tabs-header">
+              <h2>タブ</h2>
+              <button type="button" data-action="toggle-tabs-pin" class="tabs-pin" aria-pressed="true" aria-label="タブ帯のピン止めを外す" title="タブ帯のピン止めを外す">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8.5 3.5h7l-1 5 3 3v1.5h-4.75V21l-.75 1-.75-1v-8H6.5v-1.5l3-3-1-5Z" />
+                </svg>
+              </button>
+            </header>
             <div id="tab-list" role="tablist" aria-orientation="vertical"></div>
             <button data-action="new-tab" class="new-tab" aria-label="新しいタブで新規">+</button>
           </aside>
@@ -603,7 +646,7 @@ export class MarkdownQuickMemoApplication {
       (event) => {
         if (this.handleTabShortcut(event)) return;
         this.handleOutlineNavigationShortcut(event);
-        this.handleOutlineWidthShortcut(event);
+        this.handlePanelWidthShortcut(event);
         if (!event.defaultPrevented && !this.operationPending && !this.exitLocked) {
           void this.handleShortcut(event);
           if (event.defaultPrevented) event.stopPropagation();
@@ -712,6 +755,7 @@ export class MarkdownQuickMemoApplication {
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
+      "toggle-tabs-pin": () => this.toggleTabsPinned(),
       hide: () => backend.hideWindow(),
       exit: () => this.exitWithConfirmation(),
       more: () => this.toggleMoreMenu(),
@@ -780,8 +824,9 @@ export class MarkdownQuickMemoApplication {
     }
   }
 
-  private handleOutlineWidthShortcut(event: KeyboardEvent): void {
+  private handlePanelWidthShortcut(event: KeyboardEvent): void {
     if (
+      (!this.tabsNavigationActive && !this.outlineNavigationActive) ||
       !event.ctrlKey ||
       event.altKey ||
       event.shiftKey ||
@@ -798,6 +843,12 @@ export class MarkdownQuickMemoApplication {
     }
     event.preventDefault();
     event.stopPropagation();
+    if (this.tabsNavigationActive) {
+      this.updateTabsWidth(
+        event.key === "ArrowRight" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
+      );
+      return;
+    }
     this.updateOutlineWidth(
       event.key === "ArrowLeft" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
     );
@@ -1289,7 +1340,19 @@ export class MarkdownQuickMemoApplication {
   private updateTabPanel(): void {
     const fixedOutline = !this.outline.hidden && window.getComputedStyle(this.outline).position === "static"
       ? this.outlineWidth : 0;
-    this.workspace.classList.toggle("tabs-collapsed", this.workspace.clientWidth - fixedOutline - this.outlineWidth < MIN_EDITOR_WIDTH);
+    this.workspace.classList.toggle(
+      "tabs-auto-collapsed",
+      this.workspace.clientWidth - fixedOutline - this.tabsWidth < MIN_EDITOR_WIDTH,
+    );
+  }
+
+  private updateTabsWidth(delta: number): void {
+    this.tabsWidth = Math.min(
+      OUTLINE_MAX_WIDTH,
+      Math.max(OUTLINE_MIN_WIDTH, this.tabsWidth + delta),
+    );
+    this.workspace.style.setProperty("--tabs-width", `${this.tabsWidth}px`);
+    this.updateTabPanel();
   }
 
   private updateOutlineWidth(delta: number): void {

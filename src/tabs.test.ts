@@ -54,13 +54,14 @@ afterEach(() => {
     tab.editor.destroy();
   }
   document.body.replaceChildren();
+  window.localStorage.removeItem("markdown-quick-memo:tabs-pinned");
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe("複数文書のタブ", () => {
-  it("閉じるボタンを行内に重ね、ホバー時だけ表示する共通幅の水色サイドバーを使う", () => {
+  it("ピン付きの独立幅サイドバーを使い、格納時は改行せず右端を開いてフェードする", () => {
     const { app, root } = application();
     const first = app.activeTab;
     app.createTab();
@@ -71,10 +72,10 @@ describe("複数文書のタブ", () => {
     expect(firstRow.querySelector(":scope > .tab-select")).not.toBeNull();
     expect(firstRow.querySelector(":scope > .tab-close")).not.toBeNull();
     expect(styles).toContain(
-      ".workspace { padding-left: var(--outline-width, 240px); }",
+      "padding-left: var(--tabs-width, 240px);",
     );
     expect(styles).toContain(
-      "width: var(--outline-width, 240px);",
+      "width: var(--tabs-width, 240px);",
     );
     expect(styles).toContain("background: var(--tabs-background);");
     expect(styles).toContain(
@@ -86,6 +87,49 @@ describe("複数文書のタブ", () => {
     expect(styles).toContain(
       ".tab-row:hover .tab-select,\n.tab-row:focus-within .tab-select { background: var(--surface-raised); }",
     );
+    expect(root.querySelector("button[data-action='toggle-tabs-pin'] svg")).not.toBeNull();
+    expect(styles).toContain("--tabs-compact-width: 60px;");
+    expect(styles).toContain("margin: 0 0 12px; white-space: nowrap;");
+    expect(styles).toContain("margin-bottom: 4px; white-space: nowrap;");
+    expect(styles).toContain("-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);");
+    expect(styles).toContain(
+      ".tab-select[aria-selected=\"true\"] {\n  border-right-color: transparent; border-top-right-radius: 0; border-bottom-right-radius: 0;",
+    );
+    expect(styles).toContain(":is(.tab-close, .tabs-pin)");
+  });
+
+  it("ピン状態を切り替えて保存し、次の起動時にピンOFFを復元する", () => {
+    const { root } = application();
+    const workspace = root.querySelector<HTMLElement>("#workspace")!;
+    const pin = root.querySelector<HTMLButtonElement>("button[data-action='toggle-tabs-pin']")!;
+
+    expect(pin.getAttribute("aria-pressed")).toBe("true");
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(false);
+    pin.click();
+    expect(pin.getAttribute("aria-pressed")).toBe("false");
+    expect(pin.getAttribute("aria-label")).toBe("タブ帯をピン止めする");
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
+    expect(window.localStorage.getItem("markdown-quick-memo:tabs-pinned")).toBe("false");
+
+    const restored = application();
+    expect(restored.root.querySelector("#workspace")?.classList.contains("tabs-unpinned")).toBe(true);
+    expect(restored.root.querySelector("button[data-action='toggle-tabs-pin']")?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("狭幅では自動退避を優先し、幅を戻すと保存済みのピン状態へ戻る", () => {
+    window.localStorage.setItem("markdown-quick-memo:tabs-pinned", "false");
+    const { root } = application();
+    const workspace = root.querySelector<HTMLElement>("#workspace")!;
+    let workspaceWidth = 780;
+    Object.defineProperty(workspace, "clientWidth", { configurable: true, get: () => workspaceWidth });
+
+    window.dispatchEvent(new Event("resize"));
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
+    expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(true);
+    workspaceWidth = 900;
+    window.dispatchEvent(new Event("resize"));
+    expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(false);
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
   });
 
   it("Ctrl+Shift+Nで下に追加し、Ctrl+Kと上下キーで本文を切り替え、Enterで編集へ戻る", async () => {
@@ -108,6 +152,51 @@ describe("複数文書のタブ", () => {
     expect(app.activeTab).toBe(second);
     key(document.activeElement as HTMLElement, "Enter", false, false);
     expect(app.activeTab.editor.hasFocus).toBe(true);
+  });
+
+  it("Ctrl+K中は右でタブ幅を拡大し左で縮小して目次幅を変更しない", () => {
+    const { app, root } = application();
+    const workspace = root.querySelector<HTMLElement>("#workspace")!;
+
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("240px");
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+    key(app.activeTab.editor.contentDOM, "k");
+
+    const expand = key(document.activeElement as HTMLElement, "ArrowRight");
+    expect(expand.defaultPrevented).toBe(true);
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("280px");
+    expect(workspace.style.getPropertyValue("--outline-width")).toBe("240px");
+
+    key(document.activeElement as HTMLElement, "ArrowLeft");
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("240px");
+    for (let count = 0; count < 10; count += 1) {
+      key(document.activeElement as HTMLElement, "ArrowRight");
+    }
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("480px");
+    for (let count = 0; count < 10; count += 1) {
+      key(document.activeElement as HTMLElement, "ArrowLeft");
+    }
+    expect(workspace.style.getPropertyValue("--tabs-width")).toBe("240px");
+  });
+
+  it("ピンOFFでもCtrl+Kの間だけタブ操作状態を開く", () => {
+    window.localStorage.setItem("markdown-quick-memo:tabs-pinned", "false");
+    const { app, root } = application();
+    const tabs = root.querySelector("#tabs")!;
+    key(app.activeTab.editor.contentDOM, "k");
+    expect(tabs.classList.contains("tabs-navigation-active")).toBe(true);
+    key(document.activeElement as HTMLElement, "Escape", false, false);
+    expect(tabs.classList.contains("tabs-navigation-active")).toBe(false);
+    expect(app.activeTab.editor.hasFocus).toBe(true);
+  });
+
+  it("長いファイル名を省略せずタブ本文とツールチップに保持する", () => {
+    const { app, root } = application();
+    const longName = "右端が徐々に薄くなるとても長いファイル名.md";
+    app.setDocument("内容", `C:\\memo\\${longName}`);
+    const button = root.querySelector<HTMLButtonElement>(".tab-select")!;
+    expect(button.textContent).toBe(longName);
+    expect(button.title).toBe(`C:\\memo\\${longName}`);
   });
 
   it("各タブの選択・取り消し履歴・閲覧モード・目次の折りたたみを保持する", () => {
