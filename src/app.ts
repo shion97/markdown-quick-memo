@@ -1291,14 +1291,22 @@ export class MarkdownQuickMemoApplication {
   ): void {
     this.selectedOutlineKey = button.dataset.outlineKey ?? null;
     this.applyOutlineSelectionState();
-    if (typeof button.scrollIntoView === "function") {
-      button.scrollIntoView({ block: "nearest" });
-    }
+    this.scrollOutlineButtonIntoView(button);
     if (navigate) {
       navigateToHeading(
         this.editor,
         Number(button.dataset.headingPosition),
       );
+    }
+  }
+
+  private scrollOutlineButtonIntoView(button: HTMLButtonElement): void {
+    const listBounds = this.outlineList.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    if (buttonBounds.top < listBounds.top) {
+      this.outlineList.scrollTop -= listBounds.top - buttonBounds.top;
+    } else if (buttonBounds.bottom > listBounds.bottom) {
+      this.outlineList.scrollTop += buttonBounds.bottom - listBounds.bottom;
     }
   }
 
