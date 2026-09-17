@@ -1,18 +1,23 @@
+import type { EditorView } from "@codemirror/view";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   backend,
+  configureBackendEvents,
   invokeWithBackendPayload,
   onBackendEvent,
   onBackendPayload,
   type DocumentPayload,
   type HotkeyStatus,
   type PdfExportCompleted,
+  type TabTransfer,
 } from "./bridge/tauri";
 import {
   createEditor,
   documentCounts,
   replaceDocument,
   setPreviewOnly,
+  serializeEditor,
+  restoreEditor,
 } from "./editor/editor";
 import {
   buildOutlineTree,
@@ -29,6 +34,8 @@ const OUTLINE_MIN_WIDTH = 240;
 const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
 const AUTO_SAVE_DELAY_MS = 1_000;
+const MIN_EDITOR_WIDTH = 560;
+const TABS_PINNED_STORAGE_KEY = "markdown-quick-memo:tabs-pinned";
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -55,8 +62,47 @@ function markdownTargetAt(content: string, position: number): {
   return null;
 }
 
+interface DocumentTab {
+  id: string;
+  host: HTMLElement;
+  editor: EditorView;
+  path: string | null;
+  revision: RevisionTracker;
+  timer: number | undefined;
+  saving: Promise<boolean> | null;
+  collapsed: Set<string>;
+  scrollTop: number;
+  scrollLeft: number;
+}
+interface TabSnapshot {
+  editor: unknown;
+  path: string | null;
+  revision: [number, number];
+  collapsed: string[];
+  preview: boolean;
+  scrollTop: number;
+  scrollLeft: number;
+  dropY?: number;
+}
+
 export class MarkdownQuickMemoApplication {
-  private readonly revision = new RevisionTracker();
+  private tabs: DocumentTab[] = [];
+  private activeTab!: DocumentTab;
+  private initialized = false;
+  private windowLabel = "main";
+  private tabsNavigationActive = false;
+  private tabsPinned = true;
+  private operationPending = false;
+  private exitLocked = false;
+  private transferring: DocumentTab | null = null;
+  private receiving = new Set<string>();
+  private transferSubmitted = false;
+  private transferPoll: number | undefined;
+  private get revision(): RevisionTracker { return this.activeTab.revision; }
+  private get editor(): EditorView { return this.activeTab.editor; }
+  private get currentPath(): string | null { return this.activeTab.path; }
+  private set currentPath(path: string | null) { this.activeTab.path = path; }
+  private get collapsedOutlineKeys(): Set<string> { return this.activeTab.collapsed; }
   private readonly editorHost: HTMLElement;
   private readonly workspace: HTMLElement;
   private readonly title: HTMLElement;
@@ -69,19 +115,16 @@ export class MarkdownQuickMemoApplication {
   private readonly settingsDialog: HTMLDialogElement;
   private readonly hotkeyInput: HTMLInputElement;
   private readonly hotkeyStatus: HTMLElement;
-  private editor;
-  private currentPath: string | null = null;
   private suppressChanges = false;
-  private saving = false;
-  private autoSaveTimer: number | undefined;
   private translucent = false;
   private outlineWidth = OUTLINE_MIN_WIDTH;
-  private readonly collapsedOutlineKeys = new Set<string>();
+  private tabsWidth = OUTLINE_MIN_WIDTH;
   private outlineNavigationActive = false;
   private selectedOutlineKey: string | null = null;
   private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
+    this.tabsPinned = this.loadTabsPinned();
     this.root.innerHTML = this.layout();
     this.editorHost = this.required("#editor");
     this.workspace = this.required("#workspace");
@@ -95,43 +138,383 @@ export class MarkdownQuickMemoApplication {
     this.settingsDialog = this.requiredDialog("#settings-dialog");
     this.hotkeyInput = this.requiredInput("#hotkey-input");
     this.hotkeyStatus = this.required("#hotkey-status");
-    this.editor = createEditor(this.editorHost, {
+    this.createTab();
+    this.bindActions();
+    this.updateTabsPinned();
+    this.updateTabsWidth(0);
+    this.updateOutlineWidth(0);
+  }
+
+  private loadTabsPinned(): boolean {
+    try {
+      return window.localStorage.getItem(TABS_PINNED_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  }
+
+  private updateTabsPinned(): void {
+    this.workspace.classList.toggle("tabs-unpinned", !this.tabsPinned);
+    const button = this.required<HTMLButtonElement>("button[data-action='toggle-tabs-pin']");
+    const label = this.tabsPinned ? "タブ帯のピン止めを外す" : "タブ帯をピン止めする";
+    button.setAttribute("aria-pressed", String(this.tabsPinned));
+    button.setAttribute("aria-label", label);
+    button.title = label;
+  }
+
+  private toggleTabsPinned(): void {
+    this.tabsPinned = !this.tabsPinned;
+    try {
+      window.localStorage.setItem(TABS_PINNED_STORAGE_KEY, String(this.tabsPinned));
+    } catch {
+      // Storage can be unavailable in restricted webview contexts; keep the in-memory state.
+    }
+    this.updateTabsPinned();
+    if (!this.tabsPinned) this.editor.focus();
+  }
+
+  private createTab(id: string = window.crypto.randomUUID()): DocumentTab {
+    const host = document.createElement("div");
+    host.className = "tab-editor";
+    this.editorHost.append(host);
+    const tab: DocumentTab = {
+      id, host, editor: undefined as unknown as EditorView, path: null,
+      revision: new RevisionTracker(), timer: undefined, saving: null, collapsed: new Set(), scrollTop: 0, scrollLeft: 0,
+    };
+    tab.editor = createEditor(host, {
       onDocumentChanged: () => {
-        if (!this.suppressChanges) {
-          this.revision.changed();
+        if (!this.suppressChanges && this.tabs.includes(tab)) {
+          tab.revision.changed();
           this.updateTitle();
-          this.scheduleAutoSave();
+          this.scheduleAutoSave(tab);
         }
       },
       onCountsChanged: (characters, words) => {
-        this.status.textContent = `${characters.toLocaleString()} 文字 / ${words.toLocaleString()} 語`;
+        if (tab === this.activeTab) this.status.textContent = `${characters.toLocaleString()} 文字 / ${words.toLocaleString()} 語`;
       },
-      onOutlineChanged: (headings) => {
-        this.renderOutline(headings);
-      },
+      onOutlineChanged: (headings) => { if (tab === this.activeTab) this.renderOutline(headings); },
       onCursorChanged: (line, column) => {
-        this.cursorPosition.textContent = `${line}行 ${column}列`;
+        if (tab === this.activeTab) this.cursorPosition.textContent = `${line}行 ${column}列`;
       },
-      onControlClick: (position) => {
-        void this.handleControlClick(position);
-      },
-      onCopyText: (text) => {
-        void this.copyText(text);
-      },
+      onControlClick: (position) => { if (tab === this.activeTab) void this.handleControlClick(position); },
+      onCopyText: (text) => { void this.copyText(text); },
     });
-    this.bindActions();
-    this.updateOutlineWidth(0);
+    this.tabs.push(tab);
+    this.selectTab(tab);
+    return tab;
+  }
+
+  private selectTab(tab: DocumentTab, focusEditor = true): void {
+    const previous = this.activeTab;
+    if (previous && previous !== tab) {
+      previous.scrollTop = previous.editor.scrollDOM.scrollTop;
+      previous.scrollLeft = previous.editor.scrollDOM.scrollLeft;
+    }
+    this.activeTab = tab;
+    for (const candidate of this.tabs) candidate.host.hidden = candidate !== tab;
+    this.selectedOutlineKey = null;
+    this.updateTitle();
+    this.updateDocumentSummary(tab.editor.state.doc.toString());
+    this.updatePreviewButton();
+    if (previous !== tab) tab.editor.requestMeasure({ read: () => null, write: () => {
+      if (this.activeTab !== tab) return;
+      tab.editor.scrollDOM.scrollTop = tab.scrollTop;
+      tab.editor.scrollDOM.scrollLeft = tab.scrollLeft;
+    } });
+    else tab.editor.requestMeasure();
+    if (focusEditor) {
+      this.stopTabNavigation();
+      tab.editor.focus();
+    } else this.focusTabButton();
+  }
+
+  private renderTabs(): void {
+    const list = this.required("#tab-list");
+    const focused = list.contains(document.activeElement);
+    list.replaceChildren(...this.tabs.map((tab) => {
+      const row = document.createElement("div");
+      row.className = "tab-row";
+      row.dataset.tabId = tab.id;
+      const button = document.createElement("button");
+      button.className = "tab-select";
+      button.type = "button";
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(tab === this.activeTab));
+      button.tabIndex = tab === this.activeTab ? 0 : -1;
+      button.title = tab.path ?? "無題.md";
+      button.textContent = `${tab.revision.dirty ? "● " : ""}${fileName(tab.path)}`;
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "tab-close";
+      close.textContent = "×";
+      close.setAttribute("aria-label", `${fileName(tab.path)}のタブを閉じる`);
+      row.append(button, close);
+      return row;
+    }));
+    if (focused && this.tabsNavigationActive) this.focusTabButton();
+  }
+
+  private focusTabButton(): void {
+    const button = this.required<HTMLButtonElement>(".tab-select[aria-selected='true']");
+    button.focus();
+    button.scrollIntoView?.({ block: "nearest" });
+  }
+
+  private stopTabNavigation(): void {
+    this.tabsNavigationActive = false;
+    this.required("#tabs").classList.remove("tabs-navigation-active");
+  }
+
+  private handleTabShortcut(event: KeyboardEvent): boolean {
+    if (event.isComposing || event.altKey || event.metaKey || this.operationPending || this.exitLocked ||
+        (event.target instanceof HTMLElement && event.target.closest("dialog, input, textarea, select"))) return false;
+    const key = event.key.toLowerCase();
+    let action: (() => void) | undefined;
+    if (event.ctrlKey && !event.shiftKey && key === "k") {
+      action = () => {
+        if (event.repeat) return;
+        if (this.tabsNavigationActive) { this.stopTabNavigation(); this.editor.focus(); }
+        else {
+          if (this.outlineNavigationActive) this.stopOutlineNavigation();
+          this.tabsNavigationActive = true;
+          this.required("#tabs").classList.add("tabs-navigation-active");
+          this.focusTabButton();
+        }
+      };
+    } else if (event.ctrlKey && !event.shiftKey && key === "d") {
+      action = () => { if (!event.repeat) void this.performOperation(() => this.closeTab(this.activeTab)); };
+    } else if (event.ctrlKey && event.shiftKey && (key === "n" || key === "o")) {
+      action = () => { if (!event.repeat) void this.performOperation(() => key === "n" ? this.newTab() : this.openDocument(true)); };
+    } else if (this.tabsNavigationActive && event.ctrlKey && !event.shiftKey && (key === "arrowup" || key === "arrowdown")) {
+      action = () => {
+        const index = this.tabs.indexOf(this.activeTab);
+        const next = Math.max(0, Math.min(this.tabs.length - 1, index + (key === "arrowdown" ? 1 : -1)));
+        this.selectTab(this.tabs[next]!, false);
+      };
+    } else if (this.tabsNavigationActive && !event.ctrlKey && (key === "enter" || key === "escape")) {
+      action = () => { this.stopTabNavigation(); this.editor.focus(); };
+    }
+    if (!action) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    action();
+    return true;
+  }
+
+  private async performOperation(action: () => Promise<void>): Promise<void> {
+    if (this.operationPending || this.exitLocked) return;
+    this.operationPending = true;
+    this.root.inert = true;
+    try { await action(); }
+    catch (error) { await this.showError("操作を完了できませんでした", error); }
+    finally {
+      this.operationPending = false;
+      this.root.inert = this.exitLocked;
+      for (const tab of this.tabs) this.scheduleAutoSave(tab);
+      if (!this.exitLocked && this.tabs.length) this.editor.focus();
+    }
+  }
+
+  private async newTab(): Promise<void> {
+    const tab = this.createTab();
+    try { if (this.initialized) await backend.registerDocument(tab.id); }
+    catch (error) { this.removeTab(tab); throw error; }
+    this.editor.focus();
+  }
+
+  private async closeTab(tab: DocumentTab): Promise<void> {
+    const previous = this.activeTab;
+    this.selectTab(tab);
+    if (!(await this.confirmDiscardOrSave())) { this.selectTab(previous); return; }
+    if (this.tabs.length === 1) {
+      if (this.initialized) await backend.clearDocument(tab.id);
+      this.setDocument("", null);
+      setPreviewOnly(this.editor, false);
+      this.updatePreviewButton();
+    } else {
+      if (this.initialized) await backend.releaseDocument(tab.id);
+      this.removeTab(tab);
+      if (previous !== tab && this.tabs.includes(previous)) this.selectTab(previous);
+    }
+  }
+
+  private removeTab(tab: DocumentTab): void {
+    this.cancelAutoSave(tab);
+    const index = this.tabs.indexOf(tab);
+    if (index < 0) return;
+    this.tabs.splice(index, 1);
+    tab.editor.destroy();
+    tab.host.remove();
+    const next = this.tabs[Math.min(index, this.tabs.length - 1)];
+    if (next) this.selectTab(this.activeTab === tab ? next : this.activeTab);
+  }
+
+  private tabIndexAt(clientY: number): number {
+    const rows = Array.from(this.required("#tab-list").children);
+    const index = rows.findIndex((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    return index < 0 ? rows.length : index;
+  }
+
+  private async dragTab(tab: DocumentTab): Promise<void> {
+    this.selectTab(tab);
+    this.operationPending = true;
+    this.root.inert = true;
+    this.transferring = tab;
+    this.cancelAutoSave(tab);
+    let submitted = false;
+    try {
+      // Start tracking before waiting for a pending save, so a release is never missed.
+      const drag = backend.dragTab();
+      const result = await drag;
+      if (tab.saving) await tab.saving;
+      if (result.cancelled) return;
+      if (result.target === this.windowLabel) {
+        const panel = this.required("#tabs").getBoundingClientRect();
+        if (result.clientY < panel.top || result.clientY > panel.bottom) return;
+        const from = this.tabs.indexOf(tab);
+        let to = this.tabIndexAt(result.clientY);
+        this.tabs.splice(from, 1);
+        if (to > from) to -= 1;
+        this.tabs.splice(to, 0, tab);
+        this.renderTabs();
+        return;
+      }
+      if (!result.target && (!result.outside || this.tabs.length === 1)) return;
+      const snapshot: TabSnapshot = {
+        editor: serializeEditor(tab.editor), path: tab.path, revision: tab.revision.snapshot(),
+        collapsed: [...tab.collapsed], preview: tab.editor.state.readOnly,
+        scrollTop: tab.editor.scrollDOM.scrollTop, scrollLeft: tab.editor.scrollDOM.scrollLeft,
+        dropY: result.target ? result.clientY : undefined,
+      };
+      await backend.transferTab(tab.id, snapshot, result.target, result.x, result.y, 0);
+      submitted = true;
+      this.transferSubmitted = true;
+      if (this.transferring === tab) {
+        this.status.textContent = "タブを移動しています（Escで取り消し）";
+        this.pollTransfer(tab);
+      }
+
+    } catch (error) { await this.showError("タブを移動できませんでした", error); }
+    finally {
+      if (!submitted) {
+        this.transferring = null;
+        this.operationPending = false;
+        this.root.inert = this.exitLocked;
+        this.scheduleAutoSave(tab);
+      }
+    }
+  }
+
+  private async receiveTab(transfer: TabTransfer, initial = false): Promise<void> {
+    if (this.receiving.has(transfer.id)) return;
+    this.receiving.add(transfer.id);
+    if (this.operationPending || this.exitLocked) {
+      await backend.acceptTransfer(transfer.id, false);
+      return;
+    }
+    this.operationPending = true;
+    this.root.inert = true;
+    let restored: DocumentTab | undefined;
+    try {
+      const snapshot = transfer.snapshot as TabSnapshot;
+      if (snapshot.dropY !== undefined) {
+        const panel = this.required("#tabs").getBoundingClientRect();
+        if (snapshot.dropY < panel.top || snapshot.dropY > panel.bottom) throw new Error("タブ一覧の上にドロップしてください。");
+      }
+      const insertion = snapshot.dropY === undefined ? this.tabs.length : this.tabIndexAt(snapshot.dropY);
+      const placeholder = initial ? this.activeTab : undefined;
+      restored = this.createTab(transfer.documentId);
+      restoreEditor(restored.editor, snapshot.editor, snapshot.preview);
+      restored.path = snapshot.path;
+      restored.revision.restore(snapshot.revision);
+      restored.collapsed = new Set(snapshot.collapsed);
+      restored.scrollTop = snapshot.scrollTop;
+      restored.scrollLeft = snapshot.scrollLeft;
+      this.tabs.splice(this.tabs.indexOf(restored), 1);
+      this.tabs.splice(insertion, 0, restored);
+      this.selectTab(restored);
+      await backend.acceptTransfer(transfer.id, true);
+      if (placeholder) this.removeTab(placeholder);
+      const editor = restored.editor;
+      editor.requestMeasure({ read: () => null, write: () => {
+        editor.scrollDOM.scrollTop = snapshot.scrollTop;
+        editor.scrollDOM.scrollLeft = snapshot.scrollLeft;
+      } });
+      this.scheduleAutoSave(restored);
+    } catch (error) {
+      if (restored) this.removeTab(restored);
+      await backend.acceptTransfer(transfer.id, false);
+      await this.showError("タブを受け取れませんでした", error);
+    } finally {
+      this.operationPending = false;
+      this.root.inert = this.exitLocked;
+      if (this.tabs.length) this.editor.focus();
+    }
+  }
+
+  private pollTransfer(tab: DocumentTab): void {
+    // IPC events are the normal completion path; polling also recovers a missed event.
+    this.transferPoll = window.setTimeout(() => {
+      void backend.transferStatus(tab.id).then((status) => {
+        if (this.transferring !== tab) return;
+        if (status === "pending") this.pollTransfer(tab);
+        else void this.finishTransfer(tab.id, status === "accepted");
+      }).catch((error: unknown) => { void this.showError("タブの移動状態を確認できませんでした。Escで取り消せます", error); });
+    }, AUTO_SAVE_DELAY_MS);
+  }
+
+  private async finishTransfer(documentId: string, accepted: boolean): Promise<void> {
+    const tab = this.tabs.find((candidate) => candidate.id === documentId);
+    if (!tab || tab !== this.transferring) return;
+    this.transferring = null;
+    this.transferSubmitted = false;
+    window.clearTimeout(this.transferPoll);
+    this.operationPending = false;
+    this.root.inert = this.exitLocked;
+    if (accepted) {
+      this.removeTab(tab);
+      if (this.tabs.length === 0) await backend.closeEmptyWindow();
+    } else { this.updateDocumentSummary(this.editor.state.doc.toString()); this.scheduleAutoSave(tab); }
   }
 
   async initialize(): Promise<void> {
     const bootstrap = await backend.bootstrap();
-    if (bootstrap.document) {
-      this.loadPayload(bootstrap.document);
-    } else {
-      this.setDocument("", null);
+    this.windowLabel = bootstrap.windowLabel;
+    configureBackendEvents(this.windowLabel);
+    const incoming = await backend.pendingTransfer();
+    if (!incoming) {
+      await backend.registerDocument(this.activeTab.id);
+      if (bootstrap.document) {
+        this.loadPayload(await backend.openDocument(bootstrap.document.path, this.activeTab.id));
+      } else {
+        this.setDocument("", null);
+      }
     }
     this.renderHotkeyStatus(bootstrap.hotkey);
     await Promise.all([
+      onBackendPayload<string>("select-document", (id) => {
+        const tab = this.tabs.find((candidate) => candidate.id === id);
+        if (tab && !this.operationPending && !this.exitLocked) this.selectTab(tab);
+      }),
+      onBackendPayload<boolean>("exit-lock", (locked) => {
+        this.exitLocked = locked;
+        this.root.inert = locked;
+        for (const tab of this.tabs) {
+          if (locked) this.cancelAutoSave(tab); else this.scheduleAutoSave(tab);
+        }
+        if (!locked && this.tabs.length) this.editor.focus();
+      }),
+      onBackendEvent("check-exit", () => this.checkExit()),
+      onBackendPayload<TabTransfer>("receive-tab", (transfer) => { void this.receiveTab(transfer); }),
+      onBackendPayload<{documentId: string; accepted: boolean}>("transfer-completed", (result) => {
+        void this.finishTransfer(result.documentId, result.accepted);
+      }),
+      onBackendPayload<number | null>("tab-drag-hover", (position) => {
+        this.required("#tabs").classList.toggle("tabs-drag-over", position !== null);
+      }),
       onBackendEvent("focus-editor", () => this.editor.focus()),
       onBackendEvent("close-requested", () => this.exitWithConfirmation()),
       onBackendEvent("hotkey-triggered", async () => {
@@ -141,10 +524,12 @@ export class MarkdownQuickMemoApplication {
         }
       }),
       onBackendPayload<string>("open-file-requested", (path) => {
-        void this.openRequestedPath(path);
+        void this.performOperation(() => this.openRequestedPath(path, true));
       }),
     ]);
+    this.initialized = true;
     await backend.frontendReady();
+    if (incoming) await this.receiveTab(incoming, true);
     this.editor.focus();
   }
 
@@ -170,6 +555,9 @@ export class MarkdownQuickMemoApplication {
               <h2 id="shortcut-file-heading">ファイル</h2>
               <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
               <button data-action="open"><span>開く</span><kbd>Ctrl+O</kbd></button>
+              <button data-action="new-tab"><span>新しいタブで新規</span><kbd>Ctrl+Shift+N</kbd></button>
+              <button data-action="open-tab"><span>新しいタブで開く</span><kbd>Ctrl+Shift+O</kbd></button>
+              <button data-action="close-tab"><span>タブを閉じる</span><kbd>Ctrl+D</kbd></button>
               <button data-action="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
               <button data-action="save-as"><span>名前を付けて保存</span><kbd>Ctrl+Shift+S</kbd></button>
               <button data-action="rename"><span>ファイル名を変更</span><kbd>Ctrl+R</kbd></button>
@@ -191,7 +579,11 @@ export class MarkdownQuickMemoApplication {
               <h2 id="shortcut-window-heading">表示・終了</h2>
               <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
               <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
+              <div class="shortcut-row"><span>タブを操作 / 編集へ戻る</span><kbd>Ctrl+K</kbd></div>
+              <div class="shortcut-row"><span>タブを移動</span><kbd>Ctrl+↑ / Ctrl+↓</kbd></div>
+              <div class="shortcut-row"><span>タブ幅を縮小 / 拡大</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
               <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
+              <div class="shortcut-row"><span>目次幅を拡大 / 縮小</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
               <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+H</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
               <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
@@ -200,6 +592,18 @@ export class MarkdownQuickMemoApplication {
           </div>
         </header>
         <section id="workspace" class="workspace">
+          <aside id="tabs" class="tabs-panel" aria-label="タブ">
+            <header class="tabs-header">
+              <h2>タブ</h2>
+              <button type="button" data-action="toggle-tabs-pin" class="tabs-pin" aria-pressed="true" aria-label="タブ帯のピン止めを外す" title="タブ帯のピン止めを外す">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8.5 3.5h7l-1 5 3 3v1.5h-4.75V21l-.75 1-.75-1v-8H6.5v-1.5l3-3-1-5Z" />
+                </svg>
+              </button>
+            </header>
+            <div id="tab-list" role="tablist" aria-orientation="vertical"></div>
+            <button data-action="new-tab" class="new-tab" aria-label="新しいタブで新規">+</button>
+          </aside>
           <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
           <aside id="outline" class="outline-panel" aria-label="目次" hidden>
             <header class="outline-header">
@@ -240,18 +644,40 @@ export class MarkdownQuickMemoApplication {
     this.root.addEventListener(
       "keydown",
       (event) => {
+        if (this.handleTabShortcut(event)) return;
         this.handleOutlineNavigationShortcut(event);
-        this.handleOutlineWidthShortcut(event);
+        this.handlePanelWidthShortcut(event);
+        if (!event.defaultPrevented && !this.operationPending && !this.exitLocked) {
+          void this.handleShortcut(event);
+          if (event.defaultPrevented) event.stopPropagation();
+        }
       },
       { capture: true },
     );
+    this.required("#tab-list").addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || (event.target as HTMLElement).closest(".tab-close")) return;
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-tab-id]");
+      const tab = this.tabs.find((candidate) => candidate.id === row?.dataset.tabId);
+      if (tab && this.initialized && !this.operationPending && !this.exitLocked) void this.dragTab(tab);
+    });
     this.root.addEventListener("keyup", (event) => {
       if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         this.resetOutlineNavigationHold();
       }
     });
     window.addEventListener("blur", () => this.resetOutlineNavigationHold());
+    window.addEventListener("resize", () => { if (this.root.isConnected) this.updateTabPanel(); });
     this.root.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      const tabRow = target.closest<HTMLElement>("[data-tab-id]");
+      if (tabRow) {
+        const tab = this.tabs.find((candidate) => candidate.id === tabRow.dataset.tabId);
+        if (tab && !this.operationPending && !this.exitLocked) {
+          if (target.closest(".tab-close")) void this.performOperation(() => this.closeTab(tab));
+          else this.selectTab(tab);
+        }
+        return;
+      }
       const outlineToggle = (
         event.target as HTMLElement
       ).closest<HTMLButtonElement>("button[data-outline-toggle-key]");
@@ -281,7 +707,12 @@ export class MarkdownQuickMemoApplication {
       void this.runAction(button.dataset.action ?? "");
     });
     document.addEventListener("keydown", (event) => {
-      void this.handleShortcut(event);
+      if (event.key === "Escape" && this.transferring && this.transferSubmitted) {
+        event.preventDefault();
+        void backend.cancelTransfer(this.transferring.id);
+        return;
+      }
+      if (this.root.isConnected && !event.defaultPrevented && !this.operationPending && !this.exitLocked) void this.handleShortcut(event);
     });
     document.addEventListener("click", (event) => {
       const target = event.target;
@@ -304,22 +735,27 @@ export class MarkdownQuickMemoApplication {
   }
 
   private async runAction(action: string): Promise<void> {
+    if (this.operationPending || this.exitLocked) return;
     const actions: Record<string, () => void | Promise<void>> = {
-      new: () => this.newDocument(),
-      open: () => this.openDocument(),
+      new: () => this.performOperation(() => this.newDocument()),
+      open: () => this.performOperation(() => this.openDocument()),
+      "new-tab": () => this.performOperation(() => this.newTab()),
+      "open-tab": () => this.performOperation(() => this.openDocument(true)),
+      "close-tab": () => this.performOperation(() => this.closeTab(this.activeTab)),
       save: async () => {
         await this.saveDocument(false);
       },
       "save-as": async () => {
         await this.saveDocument(true);
       },
-      rename: () => this.renameDocument(),
+      rename: () => this.performOperation(() => this.renameDocument()),
       reveal: () => this.revealDocument(),
-      "export-pdf": () => this.exportPdf(),
+      "export-pdf": () => this.performOperation(() => this.exportPdf()),
       preview: () => this.togglePreviewOnly(),
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
+      "toggle-tabs-pin": () => this.toggleTabsPinned(),
       hide: () => backend.hideWindow(),
       exit: () => this.exitWithConfirmation(),
       more: () => this.toggleMoreMenu(),
@@ -334,7 +770,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private async handleShortcut(event: KeyboardEvent): Promise<void> {
-    if (!event.ctrlKey) {
+    if (!event.ctrlKey || event.altKey || event.metaKey || event.isComposing || (event.target instanceof HTMLElement && event.target.closest("dialog, input, textarea, select"))) {
       return;
     }
     const key = event.key.toLowerCase();
@@ -357,22 +793,22 @@ export class MarkdownQuickMemoApplication {
       await this.saveDocument(false);
     } else if (key === "o" && !event.shiftKey) {
       event.preventDefault();
-      await this.openDocument();
+      await this.performOperation(() => this.openDocument());
     } else if (key === "h" && !event.shiftKey) {
       event.preventDefault();
       await this.toggleOpacity();
     } else if (key === "n") {
       event.preventDefault();
-      await this.newDocument();
+      await this.performOperation(() => this.newDocument());
     } else if (key === "r" && !event.shiftKey) {
       event.preventDefault();
-      await this.renameDocument();
+      await this.performOperation(() => this.renameDocument());
     } else if (key === "e" && !event.shiftKey) {
       event.preventDefault();
       await this.revealDocument();
     } else if (key === "p" && !event.shiftKey) {
       event.preventDefault();
-      await this.exportPdf();
+      await this.performOperation(() => this.exportPdf());
     } else if (key === "x" && !event.shiftKey) {
       event.preventDefault();
       this.wrapSelection("~~");
@@ -388,8 +824,9 @@ export class MarkdownQuickMemoApplication {
     }
   }
 
-  private handleOutlineWidthShortcut(event: KeyboardEvent): void {
+  private handlePanelWidthShortcut(event: KeyboardEvent): void {
     if (
+      (!this.tabsNavigationActive && !this.outlineNavigationActive) ||
       !event.ctrlKey ||
       event.altKey ||
       event.shiftKey ||
@@ -406,6 +843,12 @@ export class MarkdownQuickMemoApplication {
     }
     event.preventDefault();
     event.stopPropagation();
+    if (this.tabsNavigationActive) {
+      this.updateTabsWidth(
+        event.key === "ArrowRight" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
+      );
+      return;
+    }
     this.updateOutlineWidth(
       event.key === "ArrowLeft" ? OUTLINE_WIDTH_STEP : -OUTLINE_WIDTH_STEP,
     );
@@ -442,10 +885,11 @@ export class MarkdownQuickMemoApplication {
     if (!(await this.confirmDiscardOrSave())) {
       return;
     }
+    if (this.initialized) await backend.clearDocument(this.activeTab.id);
     this.setDocument("", null);
   }
 
-  private async openDocument(): Promise<void> {
+  private async openDocument(newTab = false): Promise<void> {
     const selected = await open({
       multiple: false,
       directory: false,
@@ -454,96 +898,86 @@ export class MarkdownQuickMemoApplication {
     if (typeof selected !== "string") {
       return;
     }
-    await this.openRequestedPath(selected);
+    await this.openRequestedPath(selected, newTab);
   }
 
-  private async openRequestedPath(
-    path: string,
-    requireConfirmation = true,
-  ): Promise<void> {
-    if (requireConfirmation && !(await this.confirmDiscardOrSave())) {
-      return;
-    }
+  private async openRequestedPath(path: string, newTab = false): Promise<void> {
     try {
-      this.loadPayload(await backend.openDocument(path));
+      if (this.initialized && await backend.focusExisting(path)) return;
+      if (!newTab && !(await this.confirmDiscardOrSave())) return;
+      const tab = newTab ? this.createTab() : this.activeTab;
+      try {
+        if (newTab && this.initialized) await backend.registerDocument(tab.id);
+        const payload = await backend.openDocument(path, tab.id);
+        this.selectTab(tab);
+        this.loadPayload(payload);
+      } catch (error) {
+        if (newTab) {
+          if (this.initialized) await backend.releaseDocument(tab.id);
+          this.removeTab(tab);
+        }
+        throw error;
+      }
     } catch (error) {
       await this.showError("ファイルを開けませんでした", error);
     }
   }
 
-  private async saveDocument(saveAs: boolean): Promise<boolean> {
-    if (this.saving) {
-      return false;
-    }
-    this.cancelAutoSave();
-    let requestedPath: string | undefined;
-    if (saveAs || !this.currentPath) {
-      const selected = await save({
-        defaultPath: this.currentPath ?? "無題.md",
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      if (typeof selected !== "string") {
-        this.scheduleAutoSave();
-        return false;
-      }
-      requestedPath = selected;
-    }
+  private saveDocument(saveAs: boolean, tab = this.activeTab): Promise<boolean> {
+    if (tab.saving) return tab.saving;
+    const pending = this.saveTab(tab, saveAs);
+    tab.saving = pending;
+    void pending.finally(() => { tab.saving = null; });
+    return pending;
+  }
 
-    this.saving = true;
-    const revision = this.revision.current;
+  private async saveTab(tab: DocumentTab, saveAs: boolean): Promise<boolean> {
+    this.cancelAutoSave(tab);
+    let requestedPath = tab.path ?? undefined;
     try {
-      const result = await backend.saveDocument(
-        this.editor.state.doc.toString(),
-        revision,
-        requestedPath,
-      );
-      this.currentPath = result.path;
-      const accepted = this.revision.acceptSavedRevision(result.revision);
-      this.updateTitle();
-      if (!accepted && this.autoSaveTimer === undefined) {
-        this.scheduleAutoSave();
+      if (saveAs || !tab.path) {
+        const selected = await save({
+          defaultPath: tab.path ?? "無題.md",
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+        });
+        if (typeof selected !== "string") {
+          this.scheduleAutoSave(tab);
+          return false;
+        }
+        requestedPath = selected;
       }
-      return true;
+      const result = await backend.saveDocument(tab.editor.state.doc.toString(), tab.revision.current, requestedPath, tab.id);
+      tab.path = result.path;
+      const accepted = tab.revision.acceptSavedRevision(result.revision);
+      this.updateTitle();
+      if (!accepted) this.scheduleAutoSave(tab);
+      return accepted;
     } catch (error) {
       await this.showError("保存できませんでした", error);
       return false;
-    } finally {
-      this.saving = false;
     }
   }
 
-  private scheduleAutoSave(): void {
-    this.cancelAutoSave();
-    if (!this.currentPath || !this.revision.dirty) {
-      return;
-    }
-    this.autoSaveTimer = window.setTimeout(() => {
-      this.autoSaveTimer = undefined;
-      void this.autoSaveCurrentDocument();
+  private scheduleAutoSave(tab = this.activeTab): void {
+    this.cancelAutoSave(tab);
+    if (!tab.path || !tab.revision.dirty || this.exitLocked || this.transferring === tab) return;
+    tab.timer = window.setTimeout(() => {
+      tab.timer = undefined;
+      if (tab.saving) this.scheduleAutoSave(tab);
+      else void this.saveDocument(false, tab);
     }, AUTO_SAVE_DELAY_MS);
   }
 
-  private cancelAutoSave(): void {
-    if (this.autoSaveTimer === undefined) {
-      return;
-    }
-    window.clearTimeout(this.autoSaveTimer);
-    this.autoSaveTimer = undefined;
-  }
-
-  private async autoSaveCurrentDocument(): Promise<void> {
-    if (!this.currentPath || !this.revision.dirty) {
-      return;
-    }
-    if (this.saving) {
-      this.scheduleAutoSave();
-      return;
-    }
-    await this.saveDocument(false);
+  private cancelAutoSave(tab = this.activeTab): void {
+    if (tab.timer !== undefined) window.clearTimeout(tab.timer);
+    tab.timer = undefined;
   }
 
   private async renameDocument(): Promise<void> {
-    if (!this.currentPath && !(await this.saveDocument(true))) {
+    const tab = this.activeTab;
+    this.cancelAutoSave(tab);
+    if (tab.saving) await tab.saving;
+    if (!tab.path && !(await this.saveDocument(true, tab))) {
       return;
     }
     const name = window.prompt(
@@ -554,8 +988,8 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     try {
-      const payload = await backend.renameDocument(name);
-      this.currentPath = payload.path;
+      const payload = await backend.renameDocument(name, tab.id);
+      tab.path = payload.path;
       this.updateTitle();
     } catch (error) {
       await this.showError("名前を変更できませんでした", error);
@@ -571,20 +1005,21 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     try {
-      await backend.revealDocument();
+      await backend.revealDocument(this.activeTab.id);
     } catch (error) {
       await this.showError("保存先を開けませんでした", error);
     }
   }
 
   private async exportPdf(): Promise<void> {
+    const tab = this.activeTab;
     if (this.revision.dirty || !this.currentPath) {
       if (!(await this.saveDocument(false))) {
         return;
       }
     }
     try {
-      const target = await backend.pdfTarget();
+      const target = await backend.pdfTarget(tab.id);
       if (
         target.exists &&
         !(await ask("同名のPDFを上書きしますか？", {
@@ -599,25 +1034,27 @@ export class MarkdownQuickMemoApplication {
       const printRoot = this.required<HTMLElement>("#print-root");
       const { preparePrintDocument } = await import("./print");
       await preparePrintDocument(
-        this.editor.state.doc.toString(),
+        tab.editor.state.doc.toString(),
         printRoot,
-        backend.localImageData,
+        (path) => backend.localImageData(path, tab.id),
       );
       const result = await invokeWithBackendPayload<PdfExportCompleted>(
         "pdf-export-completed",
         60_000,
-        () => backend.exportPdf(target.path),
+        () => backend.exportPdf(target.path, tab.id),
       );
       if (!result.success) {
         throw new Error(result.error ?? "PDF出力に失敗しました。");
       }
-      await backend.openPdf(result.outputPath);
+      await backend.openPdf(result.outputPath, tab.id);
     } catch (error) {
       await this.showError("PDFへ書き出せませんでした", error);
     }
   }
 
   private async confirmDiscardOrSave(): Promise<boolean> {
+    if (this.activeTab.saving) await this.activeTab.saving;
+    this.cancelAutoSave();
     if (!this.revision.dirty) {
       return true;
     }
@@ -639,29 +1076,22 @@ export class MarkdownQuickMemoApplication {
   }
 
   private async exitWithConfirmation(): Promise<void> {
-    if (this.revision.dirty) {
-      const shouldSave = await ask("終了前に変更内容を保存しますか？", {
-        title: DEFAULT_TITLE,
-        kind: "warning",
-        okLabel: "保存して終了",
-        cancelLabel: "保存せず終了",
-      });
-      if (shouldSave && !(await this.saveDocument(false))) {
-        return;
+    try { await backend.confirmExit(); }
+    catch (error) { await this.showError("終了できませんでした", error); }
+  }
+
+  private async checkExit(): Promise<void> {
+    let accepted = false;
+    try {
+      if (this.operationPending || this.transferring) return;
+      for (const tab of this.tabs) {
+        this.selectTab(tab);
+        if (!(await this.confirmDiscardOrSave())) return;
       }
-      if (
-        !shouldSave &&
-        !(await ask("変更内容を保存せずに終了しますか？", {
-          title: DEFAULT_TITLE,
-          kind: "warning",
-          okLabel: "保存せず終了",
-          cancelLabel: "キャンセル",
-        }))
-      ) {
-        return;
-      }
+      accepted = true;
+    } finally {
+      await backend.exitResponse(accepted);
     }
-    await backend.confirmExit();
   }
 
   private setDocument(content: string, path: string | null): void {
@@ -671,6 +1101,7 @@ export class MarkdownQuickMemoApplication {
     this.suppressChanges = false;
     this.currentPath = path;
     this.revision.reset();
+    this.collapsedOutlineKeys.clear();
     this.updateTitle();
     this.updateDocumentSummary(content);
   }
@@ -684,6 +1115,7 @@ export class MarkdownQuickMemoApplication {
     const name = fileName(this.currentPath);
     this.title.textContent = `${dirtyMarker}${name}`;
     document.title = `${dirtyMarker}${name} — ${DEFAULT_TITLE}`;
+    this.renderTabs();
   }
 
   private updateDocumentSummary(content: string): void {
@@ -692,8 +1124,9 @@ export class MarkdownQuickMemoApplication {
     const head = this.editor.state.selection.main.head;
     const line = this.editor.state.doc.lineAt(head);
     this.cursorPosition.textContent = `${line.number}行 ${head - line.from + 1}列`;
+    const tab = this.activeTab;
     requestCompleteOutline(this.editor, (headings) => {
-      this.renderOutline(headings);
+      if (this.activeTab === tab) this.renderOutline(headings);
     });
   }
 
@@ -716,6 +1149,7 @@ export class MarkdownQuickMemoApplication {
     const hasOutline = headings.length > 0;
     this.outline.hidden = !hasOutline;
     this.workspace.classList.toggle("has-outline", hasOutline);
+    this.updateTabPanel();
     if (!hasOutline && this.outlineNavigationActive) {
       this.stopOutlineNavigation();
     } else if (hasOutline && this.outlineNavigationActive) {
@@ -802,6 +1236,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private toggleOutlineNavigation(): void {
+    this.stopTabNavigation();
     if (this.outlineNavigationActive) {
       this.stopOutlineNavigation();
       return;
@@ -902,6 +1337,24 @@ export class MarkdownQuickMemoApplication {
     this.outlineNavigationHold = null;
   }
 
+  private updateTabPanel(): void {
+    const fixedOutline = !this.outline.hidden && window.getComputedStyle(this.outline).position === "static"
+      ? this.outlineWidth : 0;
+    this.workspace.classList.toggle(
+      "tabs-auto-collapsed",
+      this.workspace.clientWidth - fixedOutline - this.tabsWidth < MIN_EDITOR_WIDTH,
+    );
+  }
+
+  private updateTabsWidth(delta: number): void {
+    this.tabsWidth = Math.min(
+      OUTLINE_MAX_WIDTH,
+      Math.max(OUTLINE_MIN_WIDTH, this.tabsWidth + delta),
+    );
+    this.workspace.style.setProperty("--tabs-width", `${this.tabsWidth}px`);
+    this.updateTabPanel();
+  }
+
   private updateOutlineWidth(delta: number): void {
     this.outlineWidth = Math.min(
       OUTLINE_MAX_WIDTH,
@@ -917,6 +1370,7 @@ export class MarkdownQuickMemoApplication {
     this.required<HTMLButtonElement>(
       "button[data-action='outline-shrink']",
     ).disabled = this.outlineWidth <= OUTLINE_MIN_WIDTH;
+    this.updateTabPanel();
   }
 
   private async handleControlClick(position: number): Promise<void> {
@@ -940,7 +1394,7 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     try {
-      this.imageElement.src = await backend.localImageData(target.target);
+      this.imageElement.src = await backend.localImageData(target.target, this.activeTab.id);
       this.imageDialog.showModal();
     } catch (error) {
       await this.showError("画像を表示できませんでした", error);
@@ -1030,6 +1484,12 @@ export class MarkdownQuickMemoApplication {
   private togglePreviewOnly(): void {
     const enabled = !this.editor.state.readOnly;
     setPreviewOnly(this.editor, enabled);
+    this.updatePreviewButton();
+    this.editor.focus();
+  }
+
+  private updatePreviewButton(): void {
+    const enabled = this.editor.state.readOnly;
     const button = this.required<HTMLButtonElement>(
       "button[data-action='preview']",
     );

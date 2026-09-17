@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, historyField } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -24,6 +24,7 @@ import {
   highlightSpecialChars,
   keymap,
   scrollPastEnd,
+  ViewPlugin,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { GFM } from "@lezer/markdown";
@@ -241,6 +242,12 @@ export function createEditor(
   let cancelOutlineRefresh: (() => void) | undefined;
   const previewOnly = new Compartment();
   const extensions: Extension[] = [
+    ViewPlugin.define(() => ({
+      destroy() {
+        window.clearTimeout(countTimer);
+        cancelOutlineRefresh?.();
+      },
+    })),
     highlightSpecialChars(),
     history(),
     drawSelection(),
@@ -358,4 +365,16 @@ export function replaceDocument(view: EditorView, content: string): void {
       ],
     }),
   );
+}
+
+export function serializeEditor(view: EditorView): unknown {
+  return view.state.toJSON({ history: historyField });
+}
+
+export function restoreEditor(view: EditorView, snapshot: unknown, preview: boolean): void {
+  const runtime = editorRuntimes.get(view);
+  if (!runtime) throw new Error("エディター設定を復元できません。");
+  view.setState(EditorState.fromJSON(snapshot, {
+    extensions: [...runtime.extensions, runtime.previewOnly.of(previewOnlyExtensions(preview))],
+  }, { history: historyField }));
 }
