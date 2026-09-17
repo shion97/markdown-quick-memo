@@ -456,6 +456,39 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(view.hasFocus).toBe(true);
   });
 
+  it("狭幅でCtrl+Lから目次を開いてもワークスペースを横スクロールしない", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const workspace = root.querySelector<HTMLElement>("#workspace")!;
+    const editorContent = root.querySelector<HTMLElement>(".cm-content")!;
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+
+    Object.defineProperty(workspace, "clientWidth", {
+      configurable: true,
+      value: 700,
+    });
+    window.dispatchEvent(new Event("resize"));
+    view.dispatch({ changes: { from: 0, insert: "# 見出し" } });
+    vi.advanceTimersByTime(120);
+    const firstHeading = root.querySelector<HTMLButtonElement>(".outline-item")!;
+    firstHeading.scrollIntoView = vi.fn(() => {
+      workspace.scrollLeft = 240;
+    });
+
+    editorContent.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "l",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(true);
+    expect(workspace.scrollLeft).toBe(0);
+    expect(firstHeading.scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("目次操作では折りたたまれた項目を飛ばす", () => {
     vi.useFakeTimers();
     const root = document.createElement("div");
