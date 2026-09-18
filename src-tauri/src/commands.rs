@@ -3,6 +3,7 @@ use crate::document::{ensure_markdown_suffix, read_markdown, write_markdown};
 use crate::launcher_protocol;
 use crate::lifecycle::show_main_window;
 use crate::pdf::{self, PdfTarget};
+use crate::session::WindowSession;
 use crate::state::{AppState, HotkeyStatus};
 use crate::workspace::{document_path, set_document_path};
 use base64::Engine;
@@ -29,6 +30,7 @@ pub struct BootstrapPayload {
     pub window_label: String,
     pub background: bool,
     pub document: Option<DocumentPayload>,
+    pub session: Option<WindowSession>,
     pub hotkey: HotkeyStatus,
 }
 
@@ -45,9 +47,13 @@ fn path_string(path: &Path) -> String {
 
 #[tauri::command]
 pub fn bootstrap(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<BootstrapPayload, String> {
+    if window.label() == "main" {
+        crate::workspace::create_restored_windows(&app)?;
+    }
     let startup_path = if window.label() == "main" {
         state
             .startup_file
@@ -75,10 +81,18 @@ pub fn bootstrap(
         status.refresh_registration();
         status.clone()
     };
+    let session = state
+        .workspace
+        .lock()
+        .map_err(|error| error.to_string())?
+        .restore_sessions
+        .get(window.label())
+        .cloned();
     Ok(BootstrapPayload {
         window_label: window.label().into(),
         background: state.background,
         document,
+        session,
         hotkey,
     })
 }
@@ -89,16 +103,22 @@ pub fn frontend_ready(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .workspace
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ready_windows
-        .insert(window.label().into());
+    let restore_active = {
+        let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+        workspace.ready_windows.insert(window.label().into());
+        workspace.restore_active_window.clone()
+    };
     state.ready.store(true, Ordering::SeqCst);
     log::info!("CodeMirrorの初期化が完了しました");
-    if window.label() == "main" && state.should_show_after_ready() {
-        show_main_window(&app)?;
+    if state.background {
+        if state.should_show_after_ready() {
+            show_main_window(&app)?;
+        }
+    } else {
+        window.show().map_err(|error| error.to_string())?;
+        if window.label() == restore_active {
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }
@@ -110,7 +130,10 @@ pub fn open_document(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<DocumentPayload, String> {
-    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
+    let _io = state
+        .document_io
+        .lock()
+        .map_err(|error| error.to_string())?;
     let path = PathBuf::from(path);
     let content = read_markdown(&path).map_err(|error| error.to_string())?;
     set_document_path(&state, &window, &document_id, Some(path.clone()))?;
@@ -129,7 +152,10 @@ pub fn save_document(
     revision: u64,
     state: State<'_, AppState>,
 ) -> Result<SaveResult, String> {
-    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
+    let _io = state
+        .document_io
+        .lock()
+        .map_err(|error| error.to_string())?;
     let requested = match path {
         Some(path) => PathBuf::from(path),
         None => document_path(&state, &window, &document_id)?
@@ -152,7 +178,10 @@ pub fn rename_document(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<DocumentPayload, String> {
-    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
+    let _io = state
+        .document_io
+        .lock()
+        .map_err(|error| error.to_string())?;
     if new_name.trim().is_empty()
         || Path::new(&new_name)
             .components()

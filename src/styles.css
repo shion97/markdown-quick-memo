@@ -164,6 +164,18 @@ button.primary:active {
   flex: 1 1 auto;
 }
 
+.document-file-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .toolbar-actions {
   flex: 0 0 auto;
 }
@@ -184,9 +196,21 @@ button.primary:active {
 }
 
 .mode-toggle {
-  padding: 6px 10px;
-  font-size: 12px;
-  white-space: nowrap;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 5px;
+}
+
+.mode-icon {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .mode-toggle-active {

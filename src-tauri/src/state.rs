@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::launcher_protocol;
+use crate::session::{self, WindowSession};
 
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
@@ -155,6 +156,12 @@ pub struct WorkspaceState {
     pub exit_pending: Vec<String>,
     pub exit_target: Option<String>,
     pub exit_active: bool,
+    pub exit_window_order: Vec<String>,
+    pub exit_active_window: String,
+    pub exit_sessions: HashMap<String, WindowSession>,
+    pub restore_sessions: HashMap<String, WindowSession>,
+    pub restore_active_window: String,
+    pub restore_windows_created: bool,
     pub dragging: bool,
 }
 pub struct AppState {
@@ -170,12 +177,22 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(options: LaunchOptions) -> Self {
+        let (restore_sessions, restore_active_window) = match session::load_session() {
+            Ok(Some(session)) => session.assigned_windows(),
+            Ok(None) => (HashMap::new(), "main".to_string()),
+            Err(error) => {
+                log::warn!("前回のセッションを読み込めませんでした: {error}");
+                (HashMap::new(), "main".to_string())
+            }
+        };
         Self {
             background: options.background,
             startup_file: Mutex::new(options.startup_file),
             document_io: Mutex::new(()),
             workspace: Mutex::new(WorkspaceState {
-                last_window: "main".into(),
+                last_window: restore_active_window.clone(),
+                restore_sessions,
+                restore_active_window,
                 ..Default::default()
             }),
             hotkey: Mutex::new(HotkeyStatus::initial(

@@ -175,12 +175,15 @@ describe("MarkdownQuickMemoApplication", () => {
   it("上部へ文書情報とコンパクトな主操作一覧を配置する", () => {
     const root = document.createElement("div");
     document.body.append(root);
-    new MarkdownQuickMemoApplication(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "本文", "C:\\memo.md");
 
     const toolbar = root.querySelector(".toolbar");
     expect(toolbar?.querySelector("#cursor-position")).not.toBeNull();
     expect(toolbar?.querySelector("#status")).not.toBeNull();
     expect(toolbar?.querySelector("button[data-action='preview']")).not.toBeNull();
+    expect(toolbar?.querySelector(".brand .document-file-icon")).not.toBeNull();
+    expect(toolbar?.querySelector("#document-title")?.textContent).toBe("memo.md");
     expect(toolbar?.querySelector(".brand-mark")).toBeNull();
     expect(toolbar?.hasAttribute("data-tauri-drag-region")).toBe(true);
     expect(
@@ -323,7 +326,9 @@ describe("MarkdownQuickMemoApplication", () => {
 
     button.click();
     expect(view.state.readOnly).toBe(true);
-    expect(button.textContent).toBe("編集モードへ戻る");
+    expect(button.querySelector(".mode-icon-edit")).not.toBeNull();
+    expect(button.getAttribute("aria-label")).toBe("編集モードに切り替える");
+    expect(button.title).toBe("編集モードに切り替える");
     expect(button.getAttribute("aria-pressed")).toBe("true");
     expect(root.querySelector("#editor")?.getAttribute("aria-label")).toBe(
       "Markdown閲覧欄",
@@ -338,6 +343,8 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(view.state.readOnly).toBe(true);
     button.click();
     expect(view.state.readOnly).toBe(false);
+    expect(button.querySelector(".mode-icon-preview")).not.toBeNull();
+    expect(button.getAttribute("aria-label")).toBe("閲覧モードに切り替える");
     view.dispatch({ changes: { from: 3, insert: "を編集" } });
     expect(view.state.doc.toString()).toBe("別文書を編集");
   });

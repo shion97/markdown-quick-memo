@@ -18,6 +18,31 @@ describe("findMathRanges", () => {
     });
   });
 
+  it("丸括弧区切りのインライン数式を原文区切り付きで検出する", () => {
+    const source = "前 \\(x^2 + \\alpha\\) 後 $y$";
+    const ranges = findMathRanges(source);
+
+    expect(ranges).toHaveLength(2);
+    expect(ranges[0]).toMatchObject({
+      expression: "x^2 + \\alpha",
+      display: false,
+      openDelimiter: "\\(",
+      closeDelimiter: "\\)",
+    });
+    expect(ranges[1]).toMatchObject({
+      expression: "y",
+      openDelimiter: "$",
+      closeDelimiter: "$",
+    });
+  });
+
+  it.each(["\\\\(literal\\)", "\\(\\)", "\\(unclosed", "\\(line\nbreak\\)"])(
+    "不正またはエスケープされた丸括弧数式を除外する: %s",
+    (source) => {
+      expect(findMathRanges(source)).toEqual([]);
+    },
+  );
+
   it("エスケープと保護範囲内のドル記号を除外する", () => {
     const source = "\\$escaped$ `code $x$` $valid$";
     const codeStart = source.indexOf("`code");
@@ -41,6 +66,12 @@ describe("findMathRanges", () => {
 
   it.each(["`$x$`", "[label $x$](url)", "![label $x$](image)"])(
     "数式を含むコード・リンク・画像は保護する: %s", (source) => {
+      expect(findMathRanges(source, 0, [{ from: 0, to: source.length }])).toEqual([]);
+    },
+  );
+
+  it.each(["`\\(x\\)`", "[label \\(x\\)](url)", "![label \\(x\\)](image)"])(
+    "丸括弧数式を含むコード・リンク・画像は保護する: %s", (source) => {
       expect(findMathRanges(source, 0, [{ from: 0, to: source.length }])).toEqual([]);
     },
   );

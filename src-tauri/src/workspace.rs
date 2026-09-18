@@ -1,3 +1,4 @@
+use crate::session::{self, PersistedSession, WindowSession};
 use crate::state::{AppState, OpenDocument, Transfer, WorkspaceState};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -173,11 +174,15 @@ pub fn focus_existing(
 }
 
 fn show_exit_confirmation(app: &AppHandle, label: &str) -> Result<(), String> {
-    let window = app.get_webview_window(label).ok_or("終了確認先が見つかりません。")?;
+    let window = app
+        .get_webview_window(label)
+        .ok_or("終了確認先が見つかりません。")?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    window.emit_to(label, "check-exit", ()).map_err(|error| error.to_string())
+    window
+        .emit_to(label, "check-exit", ())
+        .map_err(|error| error.to_string())
 }
 
 fn begin_exit(
@@ -201,6 +206,9 @@ fn begin_exit(
     };
     workspace.exit_target = target.map(str::to_owned);
     workspace.exit_active = true;
+    workspace.exit_window_order = workspace.exit_pending.clone();
+    workspace.exit_active_window = workspace.last_window.clone();
+    workspace.exit_sessions.clear();
     Ok(workspace.exit_pending.first().cloned())
 }
 
@@ -210,6 +218,15 @@ fn emit_exit_lock(app: &AppHandle, target: Option<&str>, locked: bool) -> Result
         None => app.emit("exit-lock", locked),
     }
     .map_err(|error| error.to_string())
+}
+
+fn cancel_exit(workspace: &mut WorkspaceState) -> Option<String> {
+    let target = workspace.exit_target.take();
+    workspace.exit_active = false;
+    workspace.exit_pending.clear();
+    workspace.exit_window_order.clear();
+    workspace.exit_sessions.clear();
+    target
 }
 
 pub fn request_exit(app: &AppHandle) -> Result<(), String> {
@@ -263,6 +280,7 @@ pub fn exit_response(
     window: WebviewWindow,
     state: State<'_, AppState>,
     accepted: bool,
+    session_snapshot: Option<WindowSession>,
 ) -> Result<(), String> {
     let (next, target) = {
         let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
@@ -275,12 +293,15 @@ pub fn exit_response(
             return Ok(());
         }
         if !accepted {
-            let target = workspace.exit_target.take();
-            workspace.exit_active = false;
-            workspace.exit_pending.clear();
+            let target = cancel_exit(&mut workspace);
             drop(workspace);
             emit_exit_lock(&app, target.as_deref(), false)?;
             return Ok(());
+        }
+        if let Some(snapshot) = session_snapshot {
+            workspace
+                .exit_sessions
+                .insert(window.label().to_string(), snapshot);
         }
         workspace.exit_pending.remove(0);
         let next = workspace.exit_pending.first().cloned();
@@ -315,8 +336,60 @@ pub fn exit_response(
             .destroy()
             .map_err(|error| error.to_string())?;
     } else {
+        let persisted = {
+            let workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+            PersistedSession::from_exit(
+                &workspace.exit_window_order,
+                &workspace.exit_sessions,
+                &workspace.exit_active_window,
+            )
+        };
+        if let Err(error) = session::save_session(&persisted) {
+            {
+                let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+                workspace.exit_active = false;
+                workspace.exit_pending.clear();
+                workspace.exit_window_order.clear();
+                workspace.exit_sessions.clear();
+            }
+            emit_exit_lock(&app, None, false)?;
+            return Err(format!("終了セッションを保存できませんでした: {error}"));
+        }
         state.allow_close.store(true, Ordering::SeqCst);
         app.exit(0);
+    }
+    Ok(())
+}
+
+pub fn create_restored_windows(app: &AppHandle) -> Result<(), String> {
+    let labels = {
+        let state = app.state::<AppState>();
+        let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+        if workspace.restore_windows_created {
+            return Ok(());
+        }
+        workspace.restore_windows_created = true;
+        let mut labels: Vec<_> = workspace
+            .restore_sessions
+            .keys()
+            .filter(|label| label.as_str() != "main")
+            .cloned()
+            .collect();
+        labels.sort();
+        labels
+    };
+    for label in labels {
+        if app.get_webview_window(&label).is_some() {
+            continue;
+        }
+        WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+            .title("Markdown Quick Memo")
+            .inner_size(960.0, 720.0)
+            .min_inner_size(560.0, 420.0)
+            .decorations(false)
+            .visible(false)
+            .build()
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -382,15 +455,21 @@ pub async fn drag_tab(app: AppHandle, window: WebviewWindow) -> Result<DragResul
                 {
                     continue;
                 }
-                let position = candidate.outer_position().map_err(|error| error.to_string())?;
+                let position = candidate
+                    .outer_position()
+                    .map_err(|error| error.to_string())?;
                 let size = candidate.outer_size().map_err(|error| error.to_string())?;
                 let inside = candidate.hwnd().is_ok_and(|handle| handle.0 == topmost)
                     && cursor.x >= position.x
                     && cursor.y >= position.y
                     && cursor.x < position.x + size.width as i32
                     && cursor.y < position.y + size.height as i32;
-                let inner = candidate.inner_position().map_err(|error| error.to_string())?;
-                let scale = candidate.scale_factor().map_err(|error| error.to_string())?;
+                let inner = candidate
+                    .inner_position()
+                    .map_err(|error| error.to_string())?;
+                let scale = candidate
+                    .scale_factor()
+                    .map_err(|error| error.to_string())?;
                 let client_x = f64::from(cursor.x - inner.x) / scale;
                 let client_y = f64::from(cursor.y - inner.y) / scale;
                 if inside {
@@ -601,7 +680,10 @@ pub fn accept_transfer(
     transfer_id: String,
     accepted: bool,
 ) -> Result<(), String> {
-    let _io = state.document_io.lock().map_err(|error| error.to_string())?;
+    let _io = state
+        .document_io
+        .lock()
+        .map_err(|error| error.to_string())?;
     let transfer = complete_transfer(
         &mut *state.workspace.lock().map_err(|error| error.to_string())?,
         window.label(),
@@ -782,12 +864,47 @@ mod tests {
         workspace
             .ready_windows
             .extend(["main".into(), "memo-1".into()]);
+        workspace.last_window = "memo-1".into();
+        workspace.exit_sessions.insert(
+            "stale".into(),
+            WindowSession {
+                tabs: vec![],
+                active_tab: 0,
+            },
+        );
 
         assert_eq!(
             begin_exit(&mut workspace, None).unwrap(),
             Some("main".into())
         );
         assert_eq!(workspace.exit_pending, ["main", "memo-1"]);
+        assert_eq!(workspace.exit_window_order, ["main", "memo-1"]);
+        assert_eq!(workspace.exit_active_window, "memo-1");
+        assert!(workspace.exit_sessions.is_empty());
         assert_eq!(workspace.exit_target, None);
+    }
+
+    #[test]
+    fn cancelled_exit_discards_partial_snapshots_without_persisting_them() {
+        let mut workspace = WorkspaceState {
+            exit_active: true,
+            exit_target: Some("memo-1".into()),
+            exit_pending: vec!["memo-1".into()],
+            exit_window_order: vec!["memo-1".into()],
+            ..Default::default()
+        };
+        workspace.exit_sessions.insert(
+            "memo-1".into(),
+            WindowSession {
+                tabs: vec![],
+                active_tab: 0,
+            },
+        );
+
+        assert_eq!(cancel_exit(&mut workspace).as_deref(), Some("memo-1"));
+        assert!(!workspace.exit_active);
+        assert!(workspace.exit_pending.is_empty());
+        assert!(workspace.exit_window_order.is_empty());
+        assert!(workspace.exit_sessions.is_empty());
     }
 }

@@ -60,6 +60,14 @@ describe("preparePrintDocument", () => {
     expect(target.classList.contains("print-root-preparing")).toBe(false);
   });
 
+  it("丸括弧区切りのインライン数式を印刷用HTMLへ変換する", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument("本文 \\(x^2 + \\alpha\\)", target, vi.fn());
+
+    expect(target.querySelector(".print-math-inline .katex")).not.toBeNull();
+    expect(target.textContent).not.toContain("\\(x^2");
+  });
+
   it("外部画像を取得せず代替表示へ置き換える", async () => {
     const target = document.createElement("article");
     const resolver = vi.fn<(path: string) => Promise<string>>();
@@ -138,5 +146,12 @@ describe("preparePrintDocument", () => {
       "$$u&=v\\\\w&=z$$",
     );
     expect(target.querySelector(".mqm-print-code-block")).toBeNull();
+  });
+
+  it("表示できない丸括弧数式の区切りを印刷代替表示でも保持する", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument("\\(u&=v\\)", target, vi.fn());
+
+    expect(target.querySelector("code")?.textContent).toBe("\\(u&=v\\)");
   });
 });

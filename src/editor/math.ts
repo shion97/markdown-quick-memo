@@ -9,6 +9,8 @@ export interface MathRange {
   to: number;
   expression: string;
   display: boolean;
+  openDelimiter: string;
+  closeDelimiter: string;
 }
 
 export interface ProtectedRange {
@@ -18,6 +20,14 @@ export interface ProtectedRange {
 
 const renderedMathCache = new Map<string, string>();
 const MAX_CACHE_ENTRIES = 512;
+
+function escapedAt(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
 
 function overlapsProtected(
   from: number,
@@ -44,22 +54,35 @@ export function findMathRanges(
       index += 2;
       continue;
     }
-    if (text[index] !== "$") {
+    const parenthesized =
+      text[index] === "\\" && text[index + 1] === "(" && !escapedAt(text, index);
+    if (text[index] !== "$" && !parenthesized) {
       index += 1;
       continue;
     }
 
-    const display = text[index + 1] === "$";
-    const delimiterLength = display ? 2 : 1;
+    const display = !parenthesized && text[index + 1] === "$";
+    const openDelimiter = parenthesized ? "\\(" : display ? "$$" : "$";
+    const closeDelimiter = parenthesized ? "\\)" : openDelimiter;
+    const delimiterLength = openDelimiter.length;
     const from = index;
     let end = index + delimiterLength;
     let found = false;
     while (end < text.length) {
+      if (
+        parenthesized &&
+        text.startsWith(closeDelimiter, end) &&
+        !escapedAt(text, end)
+      ) {
+        found = true;
+        break;
+      }
       if (text[end] === "\\") {
         end += 2;
         continue;
       }
       if (
+        !parenthesized &&
         text[end] === "$" &&
         (!display || text[end + 1] === "$")
       ) {
@@ -90,6 +113,8 @@ export function findMathRanges(
         to: absoluteTo,
         expression,
         display,
+        openDelimiter,
+        closeDelimiter,
       });
       index = to;
     } else {
