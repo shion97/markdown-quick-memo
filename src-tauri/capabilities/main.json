@@ -5,6 +5,10 @@
   "windows": ["main", "memo-*"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",

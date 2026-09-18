@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   backend,
@@ -536,10 +537,9 @@ export class MarkdownQuickMemoApplication {
   private layout(): string {
     return `
       <main class="application-shell">
-        <header class="toolbar">
-          <div class="brand">
-            <span class="brand-mark" aria-hidden="true">M</span>
-            <strong id="document-title">無題.md</strong>
+        <header class="toolbar" data-tauri-drag-region>
+          <div class="brand" data-tauri-drag-region>
+            <strong id="document-title" data-tauri-drag-region>無題.md</strong>
           </div>
           <div class="toolbar-actions">
             <div class="document-status" aria-label="文書情報">
@@ -549,6 +549,11 @@ export class MarkdownQuickMemoApplication {
             </div>
             <button data-action="preview" class="mode-toggle" aria-pressed="false">閲覧モード</button>
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
+            <div class="window-controls" aria-label="ウィンドウ操作">
+              <button data-action="window-minimize" class="window-control" aria-label="最小化">−</button>
+              <button data-action="window-maximize" class="window-control" aria-label="最大化または元のサイズに戻す">□</button>
+              <button data-action="window-close" class="window-control window-close" aria-label="閉じる">×</button>
+            </div>
           </div>
           <div id="more-menu" class="popover" hidden>
             <section class="popover-group" aria-labelledby="shortcut-file-heading">
@@ -756,6 +761,9 @@ export class MarkdownQuickMemoApplication {
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
       "toggle-tabs-pin": () => this.toggleTabsPinned(),
+      "window-minimize": () => getCurrentWindow().minimize(),
+      "window-maximize": () => getCurrentWindow().toggleMaximize(),
+      "window-close": () => getCurrentWindow().close(),
       hide: () => backend.hideWindow(),
       exit: () => this.exitWithConfirmation(),
       more: () => this.toggleMoreMenu(),

@@ -481,6 +481,7 @@ pub async fn transfer_tab(
             .title("Markdown Quick Memo")
             .inner_size(960.0, 720.0)
             .min_inner_size(560.0, 420.0)
+            .decorations(false)
             .visible(false)
             .build();
         match created {

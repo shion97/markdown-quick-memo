@@ -4,6 +4,7 @@ import { languages } from "@codemirror/language-data";
 import { searchPanelOpen } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { backend } from "./bridge/tauri";
 import { MarkdownQuickMemoApplication } from "./app";
@@ -15,8 +16,17 @@ const dialogMocks = vi.hoisted(() => ({
   open: vi.fn(),
   save: vi.fn(),
 }));
+const windowMocks = vi.hoisted(() => ({
+  close: vi.fn(),
+  minimize: vi.fn(),
+  toggleMaximize: vi.fn(),
+}));
+const styles = readFileSync("src/styles.css", "utf8");
 
 vi.mock("@tauri-apps/plugin-dialog", () => dialogMocks);
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => windowMocks,
+}));
 
 if (!window.Range.prototype.getClientRects) {
   Object.defineProperty(window.Range.prototype, "getClientRects", {
@@ -171,11 +181,25 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(toolbar?.querySelector("#cursor-position")).not.toBeNull();
     expect(toolbar?.querySelector("#status")).not.toBeNull();
     expect(toolbar?.querySelector("button[data-action='preview']")).not.toBeNull();
+    expect(toolbar?.querySelector(".brand-mark")).toBeNull();
+    expect(toolbar?.hasAttribute("data-tauri-drag-region")).toBe(true);
+    expect(
+      Array.from(
+        toolbar?.querySelectorAll<HTMLButtonElement>(".window-control") ?? [],
+        (button) => button.dataset.action,
+      ),
+    ).toEqual(["window-minimize", "window-maximize", "window-close"]);
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),
     ).toBeNull();
     expect(root.querySelector("footer")).toBeNull();
     expect(root.textContent).not.toContain("Markdown原文を保存");
+    expect(styles).toContain(
+      ".document-status,\n.icon-button,\n.window-control {\n  border-color: transparent;",
+    );
+    expect(styles).toContain(
+      '.icon-button[aria-expanded="true"] {\n  border-color: var(--border-strong);',
+    );
 
     const menuActions = Array.from(
       root.querySelectorAll<HTMLButtonElement>("#more-menu button"),
@@ -223,6 +247,28 @@ describe("MarkdownQuickMemoApplication", () => {
     ]) {
       expect(shortcutText).toContain(shortcut);
     }
+  });
+
+  it("上部のボタンからウィンドウを最小化・最大化・閉じる", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+
+    root.querySelector<HTMLButtonElement>(
+      "button[data-action='window-minimize']",
+    )!.click();
+    root.querySelector<HTMLButtonElement>(
+      "button[data-action='window-maximize']",
+    )!.click();
+    root.querySelector<HTMLButtonElement>(
+      "button[data-action='window-close']",
+    )!.click();
+
+    await vi.waitFor(() => {
+      expect(windowMocks.minimize).toHaveBeenCalledOnce();
+      expect(windowMocks.toggleMaximize).toHaveBeenCalledOnce();
+      expect(windowMocks.close).toHaveBeenCalledOnce();
+    });
   });
 
   it("Ctrl+Mで閲覧モードを切り替える", () => {
