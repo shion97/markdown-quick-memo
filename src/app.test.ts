@@ -192,6 +192,9 @@ describe("MarkdownQuickMemoApplication", () => {
         (button) => button.dataset.action,
       ),
     ).toEqual(["window-minimize", "window-maximize", "window-close"]);
+    expect(toolbar?.querySelectorAll(".window-control-icon")).toHaveLength(3);
+    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  min-height: 44px;");
+    expect(styles).toContain(".window-control-icon {\n  width: 20px;\n  height: 20px;");
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),
     ).toBeNull();
@@ -326,7 +329,7 @@ describe("MarkdownQuickMemoApplication", () => {
 
     button.click();
     expect(view.state.readOnly).toBe(true);
-    expect(button.querySelector(".mode-icon-edit")).not.toBeNull();
+    expect(button.querySelector(".mode-icon-preview")).not.toBeNull();
     expect(button.getAttribute("aria-label")).toBe("編集モードに切り替える");
     expect(button.title).toBe("編集モードに切り替える");
     expect(button.getAttribute("aria-pressed")).toBe("true");
@@ -343,7 +346,7 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(view.state.readOnly).toBe(true);
     button.click();
     expect(view.state.readOnly).toBe(false);
-    expect(button.querySelector(".mode-icon-preview")).not.toBeNull();
+    expect(button.querySelector(".mode-icon-edit")).not.toBeNull();
     expect(button.getAttribute("aria-label")).toBe("閲覧モードに切り替える");
     view.dispatch({ changes: { from: 3, insert: "を編集" } });
     expect(view.state.doc.toString()).toBe("別文書を編集");

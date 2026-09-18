@@ -255,11 +255,22 @@ button.primary:active {
 }
 
 .window-control {
-  min-width: 42px;
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  min-height: 44px;
   padding: 0;
   border-radius: 0;
-  font-size: 16px;
-  font-weight: 400;
+}
+
+.window-control-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 1.6;
 }
 
 .window-control:hover,

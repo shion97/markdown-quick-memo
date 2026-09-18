@@ -53,7 +53,7 @@ function normalizedPath(path: string): string {
 function modeIcon(previewEnabled: boolean) {
   const namespace = "http://www.w3.org/2000/svg";
   const icon = document.createElementNS(namespace, "svg");
-  icon.classList.add("mode-icon", previewEnabled ? "mode-icon-edit" : "mode-icon-preview");
+  icon.classList.add("mode-icon", previewEnabled ? "mode-icon-preview" : "mode-icon-edit");
   icon.setAttribute("viewBox", "0 0 24 24");
   icon.setAttribute("aria-hidden", "true");
   icon.setAttribute("focusable", "false");
@@ -61,8 +61,8 @@ function modeIcon(previewEnabled: boolean) {
   path.setAttribute(
     "d",
     previewEnabled
-      ? "M4 20h4l11-11-4-4L4 16v4Zm9.5-13.5 4 4M4 20l4-4"
-      : "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5 3.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z",
+      ? "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5 3.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
+      : "M4 20h4l11-11-4-4L4 16v4Zm9.5-13.5 4 4M4 20l4-4",
   );
   icon.append(path);
   return icon;
@@ -618,9 +618,9 @@ export class MarkdownQuickMemoApplication {
             <button data-action="preview" class="mode-toggle" aria-pressed="false" aria-label="閲覧モードに切り替える" title="閲覧モードに切り替える"></button>
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
             <div class="window-controls" aria-label="ウィンドウ操作">
-              <button data-action="window-minimize" class="window-control" aria-label="最小化">−</button>
-              <button data-action="window-maximize" class="window-control" aria-label="最大化または元のサイズに戻す">□</button>
-              <button data-action="window-close" class="window-control window-close" aria-label="閉じる">×</button>
+              <button data-action="window-minimize" class="window-control" aria-label="最小化"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 10h14" /></svg></button>
+              <button data-action="window-maximize" class="window-control" aria-label="最大化または元のサイズに戻す"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="13" height="13" /></svg></button>
+              <button data-action="window-close" class="window-control window-close" aria-label="閉じる"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m4 4 12 12M16 4 4 16" /></svg></button>
             </div>
           </div>
           <div id="more-menu" class="popover" hidden>
