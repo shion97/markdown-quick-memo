@@ -193,7 +193,7 @@ describe("MarkdownQuickMemoApplication", () => {
       ),
     ).toEqual(["window-minimize", "window-maximize", "window-close"]);
     expect(toolbar?.querySelectorAll(".window-control-icon")).toHaveLength(3);
-    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  min-height: 44px;");
+    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  min-height: 34px;");
     expect(styles).toContain(".window-control-icon {\n  width: 20px;\n  height: 20px;");
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),

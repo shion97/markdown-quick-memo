@@ -258,7 +258,7 @@ button.primary:active {
   display: grid;
   place-items: center;
   min-width: 46px;
-  min-height: 44px;
+  min-height: 34px;
   padding: 0;
   border-radius: 0;
 }
