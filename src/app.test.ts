@@ -193,8 +193,14 @@ describe("MarkdownQuickMemoApplication", () => {
       ),
     ).toEqual(["window-minimize", "window-maximize", "window-close"]);
     expect(toolbar?.querySelectorAll(".window-control-icon")).toHaveLength(3);
-    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  min-height: 34px;");
-    expect(styles).toContain(".window-control-icon {\n  width: 20px;\n  height: 20px;");
+    expect(styles).toContain(
+      ".toolbar {\n  position: relative;\n  z-index: 10;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 18px;\n  height: 38px;\n  min-height: 38px;",
+    );
+    expect(styles).toContain("align-self: center;\n  height: 38px;\n  margin: 0 -6px 0 2px;");
+    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  height: 38px;");
+    expect(styles).toContain(
+      ".window-control-icon {\n  width: 18px;\n  height: 18px;\n  fill: none;\n  stroke: currentColor;\n  stroke-linecap: square;\n  stroke-linejoin: miter;\n  stroke-width: 1.25;",
+    );
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),
     ).toBeNull();

@@ -145,8 +145,9 @@ button.primary:active {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  min-height: 44px;
-  padding: 5px 6px 5px 12px;
+  height: 38px;
+  min-height: 38px;
+  padding: 2px 6px 2px 12px;
   border-bottom: 1px solid var(--border-strong);
   background: #f5f5f5;
   box-shadow: 0 1px 0 rgb(255 255 255 / 35%) inset;
@@ -250,27 +251,28 @@ button.primary:active {
 
 .window-controls {
   display: flex;
-  align-self: stretch;
-  margin: -5px -6px -5px 2px;
+  align-self: center;
+  height: 38px;
+  margin: 0 -6px 0 2px;
 }
 
 .window-control {
   display: grid;
   place-items: center;
   min-width: 46px;
-  min-height: 34px;
+  height: 38px;
   padding: 0;
   border-radius: 0;
 }
 
 .window-control-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: square;
   stroke-linejoin: miter;
-  stroke-width: 1.6;
+  stroke-width: 1.25;
 }
 
 .window-control:hover,
@@ -1297,7 +1299,7 @@ dialog::backdrop {
 @media (max-width: 640px) {
   .toolbar {
     gap: 8px;
-    padding: 5px 6px 5px 8px;
+    padding: 2px 6px 2px 8px;
   }
 
   .document-status {
