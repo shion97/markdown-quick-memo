@@ -17,7 +17,18 @@ export interface BootstrapPayload {
   windowLabel: string;
   background: boolean;
   document: DocumentPayload | null;
+  session: WindowSession | null;
   hotkey: HotkeyStatus;
+}
+
+export interface SessionTab {
+  path: string;
+  preview: boolean;
+}
+
+export interface WindowSession {
+  tabs: SessionTab[];
+  activeTab: number;
 }
 
 export interface SaveResult {
@@ -58,7 +69,8 @@ export const backend = {
   clearDocument: (documentId: string): Promise<void> => invoke("clear_document", { documentId }),
   releaseDocument: (documentId: string): Promise<void> => invoke("release_document", { documentId }),
   focusExisting: (path: string): Promise<boolean> => invoke("focus_existing", { path }),
-  exitResponse: (accepted: boolean): Promise<void> => invoke("exit_response", { accepted }),
+  exitResponse: (accepted: boolean, sessionSnapshot: WindowSession | null = null): Promise<void> =>
+    invoke("exit_response", { accepted, sessionSnapshot }),
   dragTab: (): Promise<TabDragResult> => invoke("drag_tab"),
   transferTab: (documentId: string, snapshot: unknown, target: string | null, x: number, y: number, index: number): Promise<TabTransfer> =>
     invoke("transfer_tab", { documentId, snapshot, target, x, y, index }),

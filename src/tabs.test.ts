@@ -4,7 +4,7 @@ import type { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownQuickMemoApplication } from "./app";
-import { backend, type TabTransfer } from "./bridge/tauri";
+import { backend, type TabTransfer, type WindowSession } from "./bridge/tauri";
 import { serializeEditor, setPreviewOnly } from "./editor/editor";
 import type { RevisionTracker } from "./editor/revision";
 
@@ -25,6 +25,9 @@ interface Harness {
   saveDocument(saveAs: boolean, tab?: Tab): Promise<boolean>;
   closeTab(tab: Tab): Promise<void>;
   openRequestedPath(path: string, newTab: boolean): Promise<void>;
+  openDocument(newTab?: boolean): Promise<void>;
+  restoreWindowSession(session: WindowSession): Promise<string[]>;
+  sessionSnapshot(activeTabId?: string): WindowSession;
   receiveTab(transfer: TabTransfer): Promise<void>;
   finishTransfer(id: string, accepted: boolean): Promise<void>;
   checkExit(): Promise<void>;
@@ -71,6 +74,7 @@ describe("複数文書のタブ", () => {
     )!;
     expect(firstRow.querySelector(":scope > .tab-select")).not.toBeNull();
     expect(firstRow.querySelector(":scope > .tab-close")).not.toBeNull();
+    expect(firstRow.querySelector(".document-file-icon")).toBeNull();
     expect(styles).toContain(
       "padding-left: var(--tabs-width, 240px);",
     );
@@ -296,7 +300,7 @@ describe("複数文書のタブ", () => {
       .mockResolvedValueOnce(false).mockResolvedValueOnce(false);
     const response = vi.spyOn(backend, "exitResponse").mockResolvedValue();
     await app.checkExit();
-    expect(response).toHaveBeenCalledWith(false);
+    expect(response).toHaveBeenCalledWith(false, null);
     expect(app.tabs.map((tab) => tab.editor.state.doc.toString())).toEqual(["最初", "次"]);
   });
 
@@ -369,6 +373,106 @@ describe("複数文書のタブ", () => {
     key(app.activeTab.editor.contentDOM, "e");
     expect(reveal).toHaveBeenCalledWith(app.activeTab.id);
     expect(app.tabs).toHaveLength(2);
+  });
+
+  it("複数選択を選択順に開き、空の無題タブだけを先頭ファイルへ再利用する", async () => {
+    const { app } = application();
+    app.initialized = true;
+    dialogs.open.mockResolvedValue(["C:\\one.md", "C:\\two.md"]);
+    vi.spyOn(backend, "focusExisting").mockResolvedValue(false);
+    vi.spyOn(backend, "registerDocument").mockResolvedValue();
+    const open = vi.spyOn(backend, "openDocument").mockImplementation(async (path) => ({
+      path,
+      content: path.includes("one") ? "一つ目" : "二つ目",
+    }));
+
+    await app.openDocument();
+
+    expect(dialogs.open).toHaveBeenCalledWith(expect.objectContaining({ multiple: true }));
+    expect(app.tabs.map((tab) => tab.path)).toEqual(["C:\\one.md", "C:\\two.md"]);
+    expect(app.tabs.map((tab) => tab.editor.state.doc.toString())).toEqual(["一つ目", "二つ目"]);
+    expect(open.mock.calls.map(([path]) => path)).toEqual(["C:\\one.md", "C:\\two.md"]);
+  });
+
+  it("本文がある現在タブを保持し、複数選択をすべて新しいタブで開く", async () => {
+    const { app } = application();
+    edit(app.activeTab, "保持する本文");
+    const original = app.activeTab;
+    app.initialized = true;
+    dialogs.open.mockResolvedValue(["C:\\one.md", "C:\\two.md"]);
+    vi.spyOn(backend, "focusExisting").mockResolvedValue(false);
+    vi.spyOn(backend, "registerDocument").mockResolvedValue();
+    vi.spyOn(backend, "openDocument").mockImplementation(async (path) => ({ path, content: path }));
+
+    await app.openDocument();
+
+    expect(app.tabs).toHaveLength(3);
+    expect(app.tabs[0]).toBe(original);
+    expect(original.editor.state.doc.toString()).toBe("保持する本文");
+    expect(dialogs.ask).not.toHaveBeenCalled();
+  });
+
+  it("複数選択の一部を開けなくても残りを開く", async () => {
+    const { app } = application();
+    app.initialized = true;
+    dialogs.open.mockResolvedValue(["C:\\missing.md", "C:\\valid.md"]);
+    vi.spyOn(backend, "focusExisting").mockResolvedValue(false);
+    vi.spyOn(backend, "openDocument").mockImplementation(async (path) => {
+      if (path.includes("missing")) throw new Error("見つかりません");
+      return { path, content: "復元済み" };
+    });
+
+    await app.openDocument();
+
+    expect(app.tabs).toHaveLength(1);
+    expect(app.activeTab.path).toBe("C:\\valid.md");
+    expect(dialogs.message).toHaveBeenCalledWith(
+      "見つかりません",
+      expect.objectContaining({ title: "ファイルを開けませんでした" }),
+    );
+  });
+
+  it("終了セッションには保存済みタブの順序・選択・閲覧モードだけを含める", () => {
+    const { app } = application();
+    app.setDocument("一つ目", "C:\\one.md");
+    const first = app.activeTab;
+    setPreviewOnly(first.editor, true);
+    const untitled = app.createTab();
+    edit(untitled, "未保存");
+    const second = app.createTab();
+    app.setDocument("二つ目", "C:\\two.md");
+
+    expect(app.sessionSnapshot(second.id)).toEqual({
+      tabs: [
+        { path: "C:\\one.md", preview: true },
+        { path: "C:\\two.md", preview: false },
+      ],
+      activeTab: 1,
+    });
+  });
+
+  it("ウィンドウの保存セッションを復元し、欠損ファイルだけを報告する", async () => {
+    const { app } = application();
+    vi.spyOn(backend, "registerDocument").mockResolvedValue();
+    vi.spyOn(backend, "releaseDocument").mockResolvedValue();
+    vi.spyOn(backend, "openDocument").mockImplementation(async (path) => {
+      if (path.includes("missing")) throw new Error("missing");
+      return { path, content: path };
+    });
+
+    const failures = await app.restoreWindowSession({
+      tabs: [
+        { path: "C:\\one.md", preview: true },
+        { path: "C:\\missing.md", preview: false },
+        { path: "C:\\two.md", preview: false },
+      ],
+      activeTab: 2,
+    });
+
+    expect(failures).toEqual(["C:\\missing.md"]);
+    expect(app.tabs.map((tab) => tab.path)).toEqual(["C:\\one.md", "C:\\two.md"]);
+    expect(app.activeTab.path).toBe("C:\\two.md");
+    expect(app.tabs[0]?.editor.state.readOnly).toBe(true);
   });
 
   it("タブ一覧内のドロップ位置へ並べ替え、内容を保持する", async () => {

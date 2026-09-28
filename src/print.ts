@@ -13,39 +13,43 @@ const mathPlugin: PluginSimple = (markdown) => {
     "escape",
     "math_inline",
     (state: StateInline, silent: boolean): boolean => {
-      if (
-        state.src[state.pos] !== "$" ||
-        state.src[state.pos + 1] === "$" ||
-        (state.pos > 0 && state.src[state.pos - 1] === "\\")
-      ) {
+      const parenthesized = state.src.startsWith("\\(", state.pos);
+      const dollar =
+        state.src[state.pos] === "$" &&
+        state.src[state.pos + 1] !== "$" &&
+        (state.pos === 0 || state.src[state.pos - 1] !== "\\");
+      if (!parenthesized && !dollar) {
         return false;
       }
-      let end = state.pos + 1;
+      const openDelimiter = parenthesized ? "\\(" : "$";
+      const closeDelimiter = parenthesized ? "\\)" : "$";
+      let end = state.pos + openDelimiter.length;
       while (end < state.posMax) {
+        if (state.src.startsWith(closeDelimiter, end)) {
+          break;
+        }
         if (state.src[end] === "\\") {
           end += 2;
           continue;
-        }
-        if (state.src[end] === "$") {
-          break;
         }
         if (state.src[end] === "\n") {
           return false;
         }
         end += 1;
       }
-      if (end >= state.posMax || state.src[end] !== "$") {
+      if (end >= state.posMax || !state.src.startsWith(closeDelimiter, end)) {
         return false;
       }
-      const expression = state.src.slice(state.pos + 1, end);
+      const expression = state.src.slice(state.pos + openDelimiter.length, end);
       if (expression.trim() === "") {
         return false;
       }
       if (!silent) {
         const token = state.push("math_inline", "math", 0);
         token.content = expression;
+        token.meta = { openDelimiter, closeDelimiter };
       }
-      state.pos = end + 1;
+      state.pos = end + closeDelimiter.length;
       return true;
     },
   );
@@ -102,10 +106,15 @@ const mathPlugin: PluginSimple = (markdown) => {
 
   markdown.renderer.rules.math_inline = (tokens, index) => {
     const expression = tokens[index]?.content ?? "";
+    const metadata = tokens[index]?.meta as
+      | { openDelimiter?: string; closeDelimiter?: string }
+      | null;
+    const openDelimiter = metadata?.openDelimiter ?? "$";
+    const closeDelimiter = metadata?.closeDelimiter ?? "$";
     try {
       return `<span class="print-math-inline">${renderMath(expression, false)}</span>`;
     } catch {
-      return `<code>${markdown.utils.escapeHtml(`$${expression}$`)}</code>`;
+      return `<code>${markdown.utils.escapeHtml(`${openDelimiter}${expression}${closeDelimiter}`)}</code>`;
     }
   };
   markdown.renderer.rules.math_display = (tokens, index) => {

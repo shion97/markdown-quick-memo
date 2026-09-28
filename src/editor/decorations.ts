@@ -19,6 +19,8 @@ class MathWidget extends WidgetType {
     private readonly expression: string,
     private readonly display: boolean,
     private readonly sourcePosition: number,
+    private readonly openDelimiter: string,
+    private readonly closeDelimiter: string,
   ) {
     super();
   }
@@ -27,7 +29,9 @@ class MathWidget extends WidgetType {
     return (
       this.expression === other.expression &&
       this.display === other.display &&
-      this.sourcePosition === other.sourcePosition
+      this.sourcePosition === other.sourcePosition &&
+      this.openDelimiter === other.openDelimiter &&
+      this.closeDelimiter === other.closeDelimiter
     );
   }
 
@@ -37,9 +41,7 @@ class MathWidget extends WidgetType {
     try {
       element.innerHTML = renderMath(this.expression, this.display);
     } catch {
-      element.textContent = this.display
-        ? `$$${this.expression}$$`
-        : `$${this.expression}$`;
+      element.textContent = `${this.openDelimiter}${this.expression}${this.closeDelimiter}`;
       element.classList.add("mqm-math-fallback");
     }
     element.addEventListener("mousedown", (event) => {
@@ -997,7 +999,13 @@ export function buildDecorations(state: EditorState): DecorationSet {
         from: math.from,
         to: math.from,
         decoration: Decoration.widget({
-          widget: new MathWidget(math.expression, math.display, math.from),
+          widget: new MathWidget(
+            math.expression,
+            math.display,
+            math.from,
+            math.openDelimiter,
+            math.closeDelimiter,
+          ),
           block: math.display,
           side: -1,
         }),
@@ -1013,7 +1021,13 @@ export function buildDecorations(state: EditorState): DecorationSet {
       from: math.from,
       to: math.to,
       decoration: Decoration.replace({
-        widget: new MathWidget(math.expression, math.display, math.from),
+        widget: new MathWidget(
+          math.expression,
+          math.display,
+          math.from,
+          math.openDelimiter,
+          math.closeDelimiter,
+        ),
         block: math.display,
         inclusive: false,
       }),

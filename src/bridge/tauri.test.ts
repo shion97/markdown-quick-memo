@@ -111,4 +111,19 @@ describe("backend", () => {
       text: "日本語😀\n複数行",
     });
   });
+
+  it("終了応答へウィンドウの復元情報を渡す", async () => {
+    tauriMocks.invoke.mockResolvedValue(undefined);
+    const sessionSnapshot = {
+      tabs: [{ path: "C:\\memo.md", preview: true }],
+      activeTab: 0,
+    };
+
+    await backend.exitResponse(true, sessionSnapshot);
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("exit_response", {
+      accepted: true,
+      sessionSnapshot,
+    });
+  });
 });

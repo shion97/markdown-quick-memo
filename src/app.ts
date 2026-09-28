@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   backend,
@@ -10,6 +11,7 @@ import {
   type HotkeyStatus,
   type PdfExportCompleted,
   type TabTransfer,
+  type WindowSession,
 } from "./bridge/tauri";
 import {
   createEditor,
@@ -42,6 +44,28 @@ function fileName(path: string | null): string {
     return "無題.md";
   }
   return path.split(/[\\/]/).pop() || path;
+}
+
+function normalizedPath(path: string): string {
+  return path.replaceAll("/", "\\").toLocaleLowerCase();
+}
+
+function modeIcon(previewEnabled: boolean) {
+  const namespace = "http://www.w3.org/2000/svg";
+  const icon = document.createElementNS(namespace, "svg");
+  icon.classList.add("mode-icon", previewEnabled ? "mode-icon-preview" : "mode-icon-edit");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("focusable", "false");
+  const path = document.createElementNS(namespace, "path");
+  path.setAttribute(
+    "d",
+    previewEnabled
+      ? "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5 3.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
+      : "M4 20h4l11-11-4-4L4 16v4Zm9.5-13.5 4 4M4 20l4-4",
+  );
+  icon.append(path);
+  return icon;
 }
 
 function markdownTargetAt(content: string, position: number): {
@@ -301,7 +325,7 @@ export class MarkdownQuickMemoApplication {
     return true;
   }
 
-  private async performOperation(action: () => Promise<void>): Promise<void> {
+  private async performOperation(action: () => Promise<unknown>): Promise<void> {
     if (this.operationPending || this.exitLocked) return;
     this.operationPending = true;
     this.root.inert = true;
@@ -485,12 +509,17 @@ export class MarkdownQuickMemoApplication {
     this.windowLabel = bootstrap.windowLabel;
     configureBackendEvents(this.windowLabel);
     const incoming = await backend.pendingTransfer();
+    const restoreFailures: string[] = [];
     if (!incoming) {
       await backend.registerDocument(this.activeTab.id);
-      if (bootstrap.document) {
-        this.loadPayload(await backend.openDocument(bootstrap.document.path, this.activeTab.id));
+      if (bootstrap.session) {
+        restoreFailures.push(...await this.restoreWindowSession(bootstrap.session));
       } else {
         this.setDocument("", null);
+      }
+      this.initialized = true;
+      if (bootstrap.document) {
+        await this.openRequestedPath(bootstrap.document.path);
       }
     }
     this.renderHotkeyStatus(bootstrap.hotkey);
@@ -530,16 +559,55 @@ export class MarkdownQuickMemoApplication {
     this.initialized = true;
     await backend.frontendReady();
     if (incoming) await this.receiveTab(incoming, true);
+    if (restoreFailures.length > 0) {
+      await message(
+        `次のファイルを復元できませんでした:\n${restoreFailures.map((path) => `・${path}`).join("\n")}`,
+        { title: DEFAULT_TITLE, kind: "warning" },
+      );
+    }
     this.editor.focus();
+  }
+
+  private async restoreWindowSession(session: WindowSession): Promise<string[]> {
+    const failures: string[] = [];
+    const restored = new Map<number, DocumentTab>();
+    for (const [index, snapshot] of session.tabs.entries()) {
+      const reuse = this.isReusableEmptyTab(this.activeTab);
+      const tab = reuse ? this.activeTab : this.createTab();
+      try {
+        if (!reuse) await backend.registerDocument(tab.id);
+        const payload = await backend.openDocument(snapshot.path, tab.id);
+        this.selectTab(tab);
+        this.loadPayload(payload);
+        setPreviewOnly(tab.editor, snapshot.preview);
+        restored.set(index, tab);
+      } catch {
+        failures.push(snapshot.path);
+        if (!reuse) {
+          await backend.releaseDocument(tab.id).catch(() => undefined);
+          this.removeTab(tab);
+        }
+      }
+    }
+    const selected = restored.get(session.activeTab) ?? restored.values().next().value;
+    if (selected) {
+      this.selectTab(selected);
+    } else {
+      this.setDocument("", null);
+    }
+    return failures;
   }
 
   private layout(): string {
     return `
       <main class="application-shell">
-        <header class="toolbar">
-          <div class="brand">
-            <span class="brand-mark" aria-hidden="true">M</span>
-            <strong id="document-title">無題.md</strong>
+        <header class="toolbar" data-tauri-drag-region>
+          <div class="brand" data-tauri-drag-region>
+            <svg class="document-file-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-tauri-drag-region>
+              <path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+              <path d="M14 3v5h5M4 6H3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12" />
+            </svg>
+            <strong id="document-title" data-tauri-drag-region>無題.md</strong>
           </div>
           <div class="toolbar-actions">
             <div class="document-status" aria-label="文書情報">
@@ -547,8 +615,13 @@ export class MarkdownQuickMemoApplication {
               <span aria-hidden="true">/</span>
               <span id="status">0 文字 / 0 語</span>
             </div>
-            <button data-action="preview" class="mode-toggle" aria-pressed="false">閲覧モード</button>
+            <button data-action="preview" class="mode-toggle" aria-pressed="false" aria-label="閲覧モードに切り替える" title="閲覧モードに切り替える"></button>
             <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
+            <div class="window-controls" aria-label="ウィンドウ操作">
+              <button data-action="window-minimize" class="window-control" aria-label="最小化"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 10h14" /></svg></button>
+              <button data-action="window-maximize" class="window-control" aria-label="最大化または元のサイズに戻す"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="13" height="13" /></svg></button>
+              <button data-action="window-close" class="window-control window-close" aria-label="閉じる"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m4 4 12 12M16 4 4 16" /></svg></button>
+            </div>
           </div>
           <div id="more-menu" class="popover" hidden>
             <section class="popover-group" aria-labelledby="shortcut-file-heading">
@@ -756,6 +829,9 @@ export class MarkdownQuickMemoApplication {
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
       "toggle-tabs-pin": () => this.toggleTabsPinned(),
+      "window-minimize": () => getCurrentWindow().minimize(),
+      "window-maximize": () => getCurrentWindow().toggleMaximize(),
+      "window-close": () => getCurrentWindow().close(),
       hide: () => backend.hideWindow(),
       exit: () => this.exitWithConfirmation(),
       more: () => this.toggleMoreMenu(),
@@ -891,35 +967,53 @@ export class MarkdownQuickMemoApplication {
 
   private async openDocument(newTab = false): Promise<void> {
     const selected = await open({
-      multiple: false,
+      multiple: true,
       directory: false,
       filters: [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }],
     });
-    if (typeof selected !== "string") {
-      return;
+    const paths = typeof selected === "string" ? [selected] : selected ?? [];
+    for (const path of paths) {
+      await this.openRequestedPath(path, newTab || !this.isReusableEmptyTab(this.activeTab));
     }
-    await this.openRequestedPath(selected, newTab);
   }
 
-  private async openRequestedPath(path: string, newTab = false): Promise<void> {
+  private isReusableEmptyTab(tab: DocumentTab): boolean {
+    return tab.path === null && !tab.revision.dirty && tab.editor.state.doc.length === 0;
+  }
+
+  private localTabForPath(path: string): DocumentTab | undefined {
+    const requested = normalizedPath(path);
+    return this.tabs.find((tab) => tab.path && normalizedPath(tab.path) === requested);
+  }
+
+  private async openRequestedPath(path: string, newTab = false): Promise<DocumentTab | null> {
     try {
-      if (this.initialized && await backend.focusExisting(path)) return;
-      if (!newTab && !(await this.confirmDiscardOrSave())) return;
-      const tab = newTab ? this.createTab() : this.activeTab;
+      const local = this.localTabForPath(path);
+      if (local) {
+        this.selectTab(local);
+        return local;
+      }
+      if (this.initialized && await backend.focusExisting(path)) return null;
+      const reuse = !newTab && this.isReusableEmptyTab(this.activeTab);
+      const tab = reuse ? this.activeTab : this.createTab();
       try {
-        if (newTab && this.initialized) await backend.registerDocument(tab.id);
+        if (!reuse && this.initialized) await backend.registerDocument(tab.id);
         const payload = await backend.openDocument(path, tab.id);
         this.selectTab(tab);
         this.loadPayload(payload);
+        return tab;
       } catch (error) {
-        if (newTab) {
-          if (this.initialized) await backend.releaseDocument(tab.id);
+        if (!reuse) {
+          if (this.initialized) {
+            await backend.releaseDocument(tab.id).catch(() => undefined);
+          }
           this.removeTab(tab);
         }
         throw error;
       }
     } catch (error) {
       await this.showError("ファイルを開けませんでした", error);
+      return null;
     }
   }
 
@@ -1082,6 +1176,7 @@ export class MarkdownQuickMemoApplication {
 
   private async checkExit(): Promise<void> {
     let accepted = false;
+    const activeBeforeExit = this.activeTab;
     try {
       if (this.operationPending || this.transferring) return;
       for (const tab of this.tabs) {
@@ -1090,8 +1185,33 @@ export class MarkdownQuickMemoApplication {
       }
       accepted = true;
     } finally {
-      await backend.exitResponse(accepted);
+      if (this.tabs.includes(activeBeforeExit)) this.selectTab(activeBeforeExit);
+      try {
+        await backend.exitResponse(
+          accepted,
+          accepted ? this.sessionSnapshot(activeBeforeExit.id) : null,
+        );
+      } catch (error) {
+        await this.showError("終了できませんでした", error);
+      }
     }
+  }
+
+  private sessionSnapshot(activeTabId = this.activeTab.id): WindowSession {
+    const savedTabs = this.tabs.filter(
+      (tab): tab is DocumentTab & { path: string } => tab.path !== null,
+    );
+    const activeTab = Math.max(
+      0,
+      savedTabs.findIndex((tab) => tab.id === activeTabId),
+    );
+    return {
+      tabs: savedTabs.map((tab) => ({
+        path: tab.path,
+        preview: tab.editor.state.readOnly,
+      })),
+      activeTab,
+    };
   }
 
   private setDocument(content: string, path: string | null): void {
@@ -1114,6 +1234,7 @@ export class MarkdownQuickMemoApplication {
     const dirtyMarker = this.revision.dirty ? "● " : "";
     const name = fileName(this.currentPath);
     this.title.textContent = `${dirtyMarker}${name}`;
+    this.title.title = this.currentPath ?? name;
     document.title = `${dirtyMarker}${name} — ${DEFAULT_TITLE}`;
     this.renderTabs();
   }
@@ -1501,7 +1622,10 @@ export class MarkdownQuickMemoApplication {
     const button = this.required<HTMLButtonElement>(
       "button[data-action='preview']",
     );
-    button.textContent = enabled ? "編集モードへ戻る" : "閲覧モード";
+    const label = enabled ? "編集モードに切り替える" : "閲覧モードに切り替える";
+    button.replaceChildren(modeIcon(enabled));
+    button.setAttribute("aria-label", label);
+    button.title = label;
     button.setAttribute("aria-pressed", String(enabled));
     button.classList.toggle("mode-toggle-active", enabled);
     this.editorHost.setAttribute(

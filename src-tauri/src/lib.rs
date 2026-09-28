@@ -4,6 +4,7 @@ mod document;
 mod launcher_protocol;
 mod lifecycle;
 mod pdf;
+mod session;
 mod state;
 mod workspace;
 

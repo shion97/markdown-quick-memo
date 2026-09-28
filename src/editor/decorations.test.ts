@@ -64,6 +64,7 @@ afterEach(() => {
 describe("markdownDecorations", () => {
   it.each([
     "$[a](b) + <x> + a_b + c_d$",
+    "\\([a](b) + <x> + a_b + c_d\\)",
     "$$\n[a](b) + <x> + a_b + c_d\n$$",
   ])("数式内の括弧をMarkdown装飾にせず入力と描画を維持する: %s", (formula) => {
     const source = `${formula}\n\n通常の [リンク](https://example.com)`;
@@ -79,6 +80,13 @@ describe("markdownDecorations", () => {
     view.dispatch({ selection: { anchor: view.state.doc.length } });
     expect(parent.querySelector(".mqm-math-source")).toBeNull();
     expect(parent.querySelector(".katex")).not.toBeNull();
+  });
+
+  it("表示できない丸括弧数式の区切りを代替表示でも保持する", () => {
+    const source = "\\(u&=v\\)";
+    const parent = renderDocument(source);
+
+    expect(parent.querySelector(".mqm-math-fallback")?.textContent).toBe(source);
   });
 
   it.each(["- ", "1. ", "- [ ] ", "  - "])("%s直後の未確定入力を固定幅の要素に閉じ込めない", (prefix) => {
