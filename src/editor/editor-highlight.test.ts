@@ -52,6 +52,19 @@ afterEach(() => {
 });
 
 describe("見出しの構文ハイライト", () => {
+  it.each(["[名前]", "[名前](", "[名前](https://example.com"])("未完成リンクの名前へ構文ハイライトの下線も付けない: %s", (source) => {
+    const view = renderDocument(`${source}\n\n末尾`);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const { node } = view.domAtPos(source.indexOf("名前"));
+    let element = node instanceof HTMLElement ? node : node.parentElement;
+    while (element && element !== view.dom) {
+      const style = window.getComputedStyle(element);
+      expect(style.textDecoration).not.toContain("underline");
+      expect(style.textDecorationLine).not.toContain("underline");
+      element = element.parentElement;
+    }
+  });
+
   it.each([false, true])("報告されたフェルミ粒子の文書で本文を太字にしない（閲覧モード: %s）", (previewOnly) => {
     const source = readFileSync(
       resolve(process.cwd(), "tests/fixtures/fermion-operators.md"),

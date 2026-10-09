@@ -13,6 +13,7 @@ import {
   type ProtectedRange,
 } from "./math";
 import { parseQuotePrefix } from "./quote-prefix";
+import { markdownLink } from "./links";
 
 class MathWidget extends WidgetType {
   constructor(
@@ -779,43 +780,25 @@ function linkDecorations(
     from: segment.from,
     to: segment.to,
     enter: (node) => {
-      if (node.name !== "Link") {
-        return;
-      }
-      const linkMarks: { from: number; to: number }[] = [];
-      let child = node.node.firstChild;
-      while (child) {
-        if (child.name === "LinkMark") {
-          linkMarks.push({ from: child.from, to: child.to });
-        }
-        child = child.nextSibling;
-      }
-      const openingMark = linkMarks[0];
-      const closingLabelMark = linkMarks[1];
-      if (
-        !openingMark ||
-        !closingLabelMark ||
-        openingMark.to >= closingLabelMark.from
-      ) {
-        return false;
-      }
+      const link = markdownLink(state, node.node);
+      if (!link || link.image || link.labelFrom >= link.labelTo) return;
 
       const active = editingTouches(state, node.from, node.to);
-      if (!active) {
+      if (!active && node.from < link.labelFrom) {
         results.push({
           from: node.from,
-          to: openingMark.to,
+          to: link.labelFrom,
           decoration: Decoration.replace({}),
         });
       }
       results.push({
-        from: openingMark.to,
-        to: closingLabelMark.from,
+        from: link.labelFrom,
+        to: link.labelTo,
         decoration: Decoration.mark({ class: "mqm-link-text" }),
       });
-      if (!active) {
+      if (!active && link.labelTo < node.to) {
         results.push({
-          from: closingLabelMark.from,
+          from: link.labelTo,
           to: node.to,
           decoration: Decoration.replace({}),
         });

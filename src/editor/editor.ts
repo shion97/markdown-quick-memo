@@ -42,7 +42,6 @@ export interface EditorCallbacks {
 }
 
 const editorHighlightStyle = HighlightStyle.define([
-  { tag: tags.link, textDecoration: "underline" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
@@ -313,7 +312,7 @@ export function createEditor(
         return true;
       },
       mousedown: (event, view) => {
-        if (!(event.ctrlKey || event.metaKey)) {
+        if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) {
           return false;
         }
         const position = view.posAtCoords({

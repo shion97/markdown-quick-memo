@@ -248,6 +248,25 @@ describe("markdownDecorations", () => {
     expect(view?.state.doc.toString()).toBe(source);
   });
 
+  it.each(["[名前]", "[名前](", "[名前](https://example.com", "[名前]()"])("未完成のリンクは装飾せず原文を表示する: %s", (source) => {
+    const parent = renderDocument(`${source}\n\nカーソル位置`);
+    expect(parent.querySelector(".mqm-link-text")).toBeNull();
+    expect(parent.textContent).toContain(source);
+  });
+
+  it.each([false, true])("山括弧のURLはURLだけを装飾する（閲覧モード: %s）", (readOnly) => {
+    const source = "<https://example.com/path?q=1>\n\nカーソル位置";
+    const parent = renderDocument(source, source.length, readOnly);
+    expect(parent.querySelector(".mqm-link-text")?.textContent).toBe("https://example.com/path?q=1");
+    expect(parent.querySelector(".cm-content")?.textContent).not.toContain("<");
+    expect(views.at(-1)?.state.doc.toString()).toBe(source);
+  });
+
+  it("本文中のURLも装飾する", () => {
+    const parent = renderDocument("https://example.com\n\nカーソル位置");
+    expect(parent.querySelector(".mqm-link-text")?.textContent).toBe("https://example.com");
+  });
+
   it("選択中のMarkdownリンクは装飾を維持して原文を表示する", () => {
     const source = "[名前](https://example.com)";
     const parent = renderDocument(source, {

@@ -65,6 +65,91 @@ function saveApplicationDocument(
 }
 
 describe("MarkdownQuickMemoApplication", () => {
+  it.each([false, true])("Ctrl＋クリックでリンクをバックエンドへ渡す（閲覧モード: %s）", async (previewOnly) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    for (const [source, expected] of [
+      ["[名前](https://example.com)", "https://example.com"],
+      ["[名前](https://example.com/a(b) \"タイトル\")", "https://example.com/a(b)"],
+      ["[名前](<https://example.com/a(b)>)", "https://example.com/a(b)"],
+      ["<https://example.com>", "https://example.com"],
+      ["https://example.com", "https://example.com"],
+    ]) {
+      setApplicationDocument(application, `${source}\n\n末尾`, null);
+      if (previewOnly && !view.state.readOnly) root.querySelector<HTMLButtonElement>("button[data-action='preview']")!.click();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      const before = view.state.selection;
+      vi.spyOn(view, "posAtCoords").mockReturnValue(source!.indexOf("名前") >= 0 ? source!.indexOf("名前") : 3);
+      view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true, button: 0 }));
+      await vi.waitFor(() => expect(openUrl).toHaveBeenLastCalledWith(expected));
+      expect(view.state.selection.eq(before)).toBe(true);
+      expect(view.state.doc.toString()).toBe(`${source}\n\n末尾`);
+    }
+  });
+
+  it.each([
+    ["[名前]", 2], ["[名前](https://example.com", 2],
+    ["`[名前](https://example.com)`", 3],
+    ["```\n[名前](https://example.com)\n```", 6],
+    ["$x+[名前](https://example.com)$", 6],
+  ] as const)("リンクでない文字列は開かない: %s", async (source, position) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, source, null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    vi.spyOn(view, "posAtCoords").mockReturnValue(position);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await Promise.resolve();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("Chrome起動エラーを画面に表示する", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "[名前](https://example.com)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    vi.spyOn(backend, "openExternalUrl").mockRejectedValue("Google Chromeが見つかりません。");
+    vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await vi.waitFor(() => expect(dialogMocks.message).toHaveBeenCalledWith("Google Chromeが見つかりません。", { title: "リンクを開けませんでした", kind: "error" }));
+  });
+
+  it.each([{ ctrlKey: false, button: 0 }, { ctrlKey: true, button: 2 }])("通常クリックと右クリックではリンクを開かない: %o", async (options) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "[名前](https://example.com)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ...options }));
+    await Promise.resolve();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("ローカル画像のCtrl＋クリックは既存の画像プレビューを開く", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "![画像](local.png)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const imageData = vi.spyOn(backend, "localImageData").mockResolvedValue("data:image/png;base64,test");
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    const showModal = vi.fn();
+    for (const dialog of root.querySelectorAll("dialog")) dialog.showModal = showModal;
+    vi.spyOn(view, "posAtCoords").mockReturnValue(3);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await vi.waitFor(() => expect(showModal).toHaveBeenCalledOnce());
+    expect(imageData).toHaveBeenCalledWith("local.png", expect.any(String));
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
   it("選択したMarkdown原文を改行区切りでコピー対象にする", () => {
     const source = "日本語😀\nfirst\nsecond";
     const state = EditorState.create({

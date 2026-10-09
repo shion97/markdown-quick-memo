@@ -30,6 +30,7 @@ import {
   type OutlineNode,
 } from "./editor/outline";
 import { RevisionTracker } from "./editor/revision";
+import { markdownTargetAt } from "./editor/links";
 
 const DEFAULT_TITLE = "Markdown Quick Memo";
 const OUTLINE_MIN_WIDTH = 240;
@@ -66,24 +67,6 @@ function modeIcon(previewEnabled: boolean) {
   );
   icon.append(path);
   return icon;
-}
-
-function markdownTargetAt(content: string, position: number): {
-  image: boolean;
-  target: string;
-} | null {
-  const pattern = /(!)?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-  for (const match of content.matchAll(pattern)) {
-    const start = match.index;
-    const end = start + match[0].length;
-    if (position >= start && position <= end) {
-      return {
-        image: match[1] === "!",
-        target: match[2] ?? "",
-      };
-    }
-  }
-  return null;
 }
 
 interface DocumentTab {
@@ -1503,7 +1486,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private async handleControlClick(position: number): Promise<void> {
-    const target = markdownTargetAt(this.editor.state.doc.toString(), position);
+    const target = markdownTargetAt(this.editor.state, position);
     if (!target) {
       return;
     }
