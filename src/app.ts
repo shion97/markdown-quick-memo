@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import { insertMarkdownTable } from "./editor/table-editing";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import {
@@ -205,6 +206,7 @@ export class MarkdownQuickMemoApplication {
       },
       onControlClick: (position) => { if (tab === this.activeTab) void this.handleControlClick(position); },
       onCopyText: (text) => { void this.copyText(text); },
+      onInsertTable: () => this.insertTable(),
     });
     this.tabs.push(tab);
     this.selectTab(tab);
@@ -1537,6 +1539,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private insertTable(): void {
+    if (this.editor.state.readOnly) return;
     const rowInput = window.prompt("表の行数を入力してください。", "3");
     if (rowInput === null) {
       return;
@@ -1561,25 +1564,7 @@ export class MarkdownQuickMemoApplication {
       });
       return;
     }
-    const tableRows = [
-      `| ${Array.from({ length: columns }, () => "q").join(" | ")} |`,
-      `| ${Array.from({ length: columns }, () => "---").join(" | ")} |`,
-      ...Array.from(
-        { length: Math.max(0, rows - 1) },
-        () => `| ${Array.from({ length: columns }, () => "q").join(" | ")} |`,
-      ),
-    ];
-    const table = tableRows.join("\n");
-    const selection = this.editor.state.selection.main;
-    this.editor.dispatch({
-      changes: {
-        from: selection.from,
-        to: selection.to,
-        insert: table,
-      },
-      selection: { anchor: selection.from + 2 },
-      userEvent: "input",
-    });
+    insertMarkdownTable(this.editor, Array.from({ length: rows }, () => Array.from({ length: columns }, () => "")));
     this.editor.focus();
   }
 

@@ -16,7 +16,7 @@ import {
   Prec,
 } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { tableRowRanges } from "./decorations";
+import { findTable, tableRowRanges } from "./tables";
 import { parseQuotePrefix } from "./quote-prefix";
 
 interface Continuation {
@@ -290,17 +290,7 @@ function handleTab(view: EditorView, remove: boolean): boolean {
 }
 
 function insideTable(view: EditorView, position: number): boolean {
-  let node = syntaxTree(view.state).resolveInner(position, 1);
-  while (true) {
-    if (node.name === "Table") {
-      return true;
-    }
-    const parent = node.parent;
-    if (!parent) {
-      return false;
-    }
-    node = parent;
-  }
+  return findTable(view.state, position) !== null;
 }
 
 function moveAcrossTableCellBoundary(

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { backend } from "./bridge/tauri";
 import { MarkdownQuickMemoApplication } from "./app";
 import { selectedCopyText } from "./editor/editor";
+import { runTableAction, selectTableCells } from "./editor/table-editing";
 
 const dialogMocks = vi.hoisted(() => ({
   ask: vi.fn(),
@@ -225,6 +226,20 @@ describe("MarkdownQuickMemoApplication", () => {
     );
   });
 
+  it("表の矩形コピーも既存のWindowsコピーAPIへ渡す", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "| a | b |\n| --- | --- |\n| **日本語** | x<br>y |", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const copyText = vi.spyOn(backend, "copyText").mockResolvedValue();
+    view.dispatch({ selection: { anchor: 2 } });
+    selectTableCells(view, { row: 1, column: 0 }, { row: 1, column: 1 });
+    view.contentDOM.dispatchEvent(new Event("copy", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(copyText).toHaveBeenCalledWith('**日本語**\t"x\ny"');
+  });
+
   it("Juliaコードブロックを言語別にハイライトする", async () => {
     const julia = languages.find((language) => language.name === "Julia");
     expect(julia).toBeDefined();
@@ -384,6 +399,21 @@ describe("MarkdownQuickMemoApplication", () => {
     );
 
     expect(view.state.readOnly).toBe(true);
+  });
+
+  it("Ctrl+Tは行列指定を維持し、空の表を独立したブロックとして挿入する", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    view.dispatch({ changes: { from: 0, insert: "前後" }, selection: { anchor: 1 } });
+    const prompt = vi.spyOn(window, "prompt").mockReturnValueOnce("2").mockReturnValueOnce("1");
+    view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "t", ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(prompt).toHaveBeenNthCalledWith(1, "表の行数を入力してください。", "3");
+    expect(prompt).toHaveBeenNthCalledWith(2, "表の列数を入力してください。", "3");
+    expect(view.state.doc.toString()).toBe("前\n\n|  |\n| --- |\n|  |\n\n後");
+    expect(view.dom.querySelectorAll(".mqm-table-cell")).toHaveLength(2);
+    prompt.mockRestore();
   });
 
   it("Ctrl+Oでファイルを開き、Ctrl+Hで半透明表示を切り替える", async () => {
@@ -1041,6 +1071,23 @@ describe("MarkdownQuickMemoApplication", () => {
 
     expect(saveDocument).not.toHaveBeenCalled();
     expect(dialogMocks.save).not.toHaveBeenCalled();
+  });
+
+  it("表の構造操作もMarkdown原文として自動保存する", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "| a | b |\n| --- | --- |\n| c | d |", path);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const saveDocument = vi.spyOn(backend, "saveDocument").mockResolvedValue({ path, revision: 1 });
+    view.dispatch({ selection: { anchor: 2 } });
+    runTableAction(view, "column-after", { row: 0, column: 0 });
+    const source = "| a |  | b |\n| --- | --- | --- |\n| c |  | d |";
+    expect(view.state.doc.toString()).toBe(source);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(saveDocument).toHaveBeenCalledWith(source, 1, path, expect.any(String));
   });
 
   it("手動保存は即時実行し、待機中の自動保存を重複させない", async () => {

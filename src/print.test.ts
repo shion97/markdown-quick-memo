@@ -4,6 +4,24 @@ import { describe, expect, it, vi } from "vitest";
 import { preparePrintDocument } from "./print";
 
 describe("preparePrintDocument", () => {
+  it("表の1列・2本区切り・不揃いな行・数式パイプを共通の仕様で印刷する", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument("| a |\n| --: |\n| x<br>y | $a|b$ |", target, vi.fn());
+    expect(target.querySelectorAll("th")).toHaveLength(2);
+    expect(target.querySelectorAll("td")).toHaveLength(2);
+    expect(target.querySelector("td br")).not.toBeNull();
+    expect((target.querySelector("td") as HTMLElement).style.textAlign).toBe("right");
+    expect(target.querySelector("td .katex")).not.toBeNull();
+  });
+
+  it("表セルのbrだけを改行し、コード・数式・任意HTMLを保護する", async () => {
+    const target = document.createElement("article");
+    await preparePrintDocument("本文<br>\n\n| 見出し |\n| --- |\n| a<br>b `<br>` $x<br>y$ \\<br> <img src=x onerror=alert(1)> |", target, vi.fn());
+    expect(target.querySelectorAll("br")).toHaveLength(1);
+    expect(target.querySelector("code")?.textContent).toBe("<br>");
+    expect(target.querySelector("img")).toBeNull();
+    expect(target.querySelector("p")?.textContent).toBe("本文<br>");
+  });
   it.each(["julia", "jl"])(
     "%sコードブロックをJuliaとして安全にハイライトする",
     async (language) => {

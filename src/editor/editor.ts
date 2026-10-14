@@ -31,6 +31,7 @@ import { GFM } from "@lezer/markdown";
 import { markdownDecorations } from "./decorations";
 import { markdownInputAssistance } from "./input-assistance";
 import { requestCompleteOutline, type OutlineHeading } from "./outline";
+import { selectedTableText, tableEditing } from "./table-editing";
 
 export interface EditorCallbacks {
   onDocumentChanged: (content: string) => void;
@@ -39,6 +40,7 @@ export interface EditorCallbacks {
   onCursorChanged: (line: number, column: number) => void;
   onControlClick: (position: number) => void;
   onCopyText: (text: string) => void;
+  onInsertTable?: () => void;
 }
 
 const editorHighlightStyle = HighlightStyle.define([
@@ -227,6 +229,8 @@ export function documentCounts(content: string): {
 }
 
 export function selectedCopyText(state: EditorState): string | null {
+  const tableText = selectedTableText(state);
+  if (tableText !== null) return tableText;
   const selected = state.selection.ranges
     .filter((range) => !range.empty)
     .map((range) => state.sliceDoc(range.from, range.to));
@@ -270,6 +274,7 @@ export function createEditor(
       ]),
     ),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+    tableEditing({ onInsertTable: () => callbacks.onInsertTable?.() }),
     markdownInputAssistance(),
     markdownDecorations,
     editorTheme(),

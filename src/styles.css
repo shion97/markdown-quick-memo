@@ -782,6 +782,25 @@ button.primary:active {
   box-sizing: border-box;
 }
 
+.mqm-table-cell-selected {
+  background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.mqm-table-menu {
+  position: fixed;
+  right: auto;
+  width: max-content;
+  max-width: 100vw;
+  max-height: 100vh;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.mqm-table-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .mqm-decoration-source {
   color: inherit;
   font: inherit;

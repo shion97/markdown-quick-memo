@@ -4,6 +4,8 @@ import MarkdownIt, { type PluginSimple } from "markdown-it";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 import { renderMath } from "./editor/math";
+import { EditorState } from "@codemirror/state";
+import { tableBreakRanges, tableFromLine, tableMatrix } from "./editor/tables";
 
 hljs.registerLanguage("julia", julia);
 hljs.registerAliases("jl", { languageName: "julia" });
@@ -143,6 +145,46 @@ const renderer = new MarkdownIt({
     }).value;
   },
 }).use(mathPlugin);
+
+// Use the same cell boundaries as the editor, without enabling arbitrary HTML.
+renderer.block.ruler.at("table", (state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean => {
+  if (startLine + 1 >= endLine || state.sCount[startLine]! - state.blkIndent >= 4) return false;
+  const lines: string[] = [];
+  for (let line = startLine; line < endLine; line += 1) {
+    const content = state.src.slice(state.bMarks[line]! + state.tShift[line]!, state.eMarks[line]!);
+    if (line > startLine + 1 && (!content.includes("|") || state.sCount[line]! < state.blkIndent)) break;
+    lines.push(content);
+  }
+  const table = tableFromLine(EditorState.create({ doc: lines.join("\n") }), 1);
+  if (!table) return false;
+  if (silent) return true;
+  const finalLine = startLine + table.rows.length + 1;
+  const open = state.push("table_open", "table", 1);
+  open.block = true; open.map = [startLine, finalLine];
+  const rows = tableMatrix(table);
+  rows.forEach((row, rowIndex) => {
+    const heading = rowIndex === 0;
+    if (heading) state.push("thead_open", "thead", 1);
+    else if (rowIndex === 1) state.push("tbody_open", "tbody", 1);
+    state.push("tr_open", "tr", 1);
+    row.forEach((text, column) => {
+      const tag = heading ? "th" : "td";
+      const token = state.push(`${tag}_open`, tag, 1);
+      token.attrSet("style", `text-align: ${table.alignments[column]}`);
+      const inline = state.push("inline", "", 0);
+      inline.content = text;
+      for (const range of tableBreakRanges(text).reverse()) inline.content = inline.content.slice(0, range.from) + "\\\n" + inline.content.slice(range.to);
+      inline.children = [];
+      state.push(`${tag}_close`, tag, -1);
+    });
+    state.push("tr_close", "tr", -1);
+    if (heading) state.push("thead_close", "thead", -1);
+  });
+  if (rows.length > 1) state.push("tbody_close", "tbody", -1);
+  state.push("table_close", "table", -1);
+  state.line = finalLine;
+  return true;
+});
 
 function firstTextNode(
   element: HTMLElement,
