@@ -801,6 +801,14 @@ button.primary:active {
   cursor: default;
 }
 
+.mqm-table-menu-label {
+  margin-top: 2px;
+  padding: 4px 7px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .mqm-decoration-source {
   color: inherit;
   font: inherit;

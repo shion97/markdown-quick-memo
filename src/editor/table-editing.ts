@@ -1,6 +1,6 @@
 import { isolateHistory } from "@codemirror/commands";
 import { EditorState, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
 import { clipboardCellText, findTable, markdownCellText, readClipboardTable, serializeTable, tableMatrix, tableMathRanges, tableRowRanges, type MarkdownTable, type TableAlignment } from "./tables";
 
 export interface CellCoordinate { row: number; column: number }
@@ -287,11 +287,19 @@ export function tableEditing(callbacks: TableCallbacks): Extension {
   ])), ViewPlugin.fromClass(class {
     private menu: HTMLElement | null = null;
     private menuParent: HTMLElement | null = null;
+    private submenu: HTMLElement | null = null;
+    private submenuButton: HTMLButtonElement | null = null;
     constructor(private view: EditorView) { document.addEventListener("mousedown", this.outside); }
     private outside = (event: MouseEvent) => { if (this.menu && event.target instanceof Node && !this.menu.contains(event.target)) this.close(); };
-    close(): void { this.menu?.remove(); this.menu = null; this.menuParent?.classList.remove("table-menu-open"); this.menuParent = null; }
-    update(update: { docChanged: boolean; selectionSet: boolean; view: EditorView }): void {
-      if (update.docChanged || update.selectionSet || update.view.state.readOnly) this.close();
+    private closeSubmenu(): void {
+      this.submenu?.remove();
+      this.submenu = null;
+      this.submenuButton?.setAttribute("aria-expanded", "false");
+      this.submenuButton = null;
+    }
+    close(): void { this.closeSubmenu(); this.menu?.remove(); this.menu = null; this.menuParent?.classList.remove("table-menu-open"); this.menuParent = null; }
+    update(update: ViewUpdate): void {
+      if (update.docChanged || update.selectionSet || update.startState.readOnly !== update.state.readOnly) this.close();
     }
     destroy(): void { this.close(); document.removeEventListener("mousedown", this.outside); }
     private locate(event: MouseEvent): { table: MarkdownTable; cell: CellCoordinate } | null {
@@ -306,6 +314,7 @@ export function tableEditing(callbacks: TableCallbacks): Extension {
       return table && position !== null ? { table, cell: coordinateAt(table, position) } : null;
     }
     mousedown(event: MouseEvent): boolean {
+      if (event.target instanceof Node && this.menu?.contains(event.target)) return false;
       if (event.button !== 0 || event.ctrlKey || event.metaKey || this.view.composing) return false;
       const target = this.locate(event);
       if (!target) { this.view.dispatch({ effects: tableInteractionEffect.of(null) }); return false; }
@@ -337,26 +346,79 @@ export function tableEditing(callbacks: TableCallbacks): Extension {
       menu.className = "popover mqm-table-menu";
       menu.setAttribute("role", "menu");
       menu.setAttribute("aria-label", "表の操作");
-      const addButton = (label: string, run: () => void, disabled = false) => {
+      const addButton = (parent: HTMLElement, label: string, run: () => void, disabled = false, closesMenu = true): HTMLButtonElement => {
         const button = document.createElement("button");
         button.type = "button"; button.textContent = label; button.disabled = disabled; button.setAttribute("role", "menuitem");
-        button.addEventListener("click", () => { this.close(); run(); this.view.focus(); });
-        menu.append(button);
+        button.addEventListener("click", () => {
+          if (closesMenu) { this.close(); run(); this.view.focus(); }
+          else run();
+        });
+        parent.append(button);
+        return button;
       };
-      if (target) for (const [action, label] of menuActions) {
+      const addAction = (parent: HTMLElement, action: TableAction, label: string) => {
+        if (!target) return;
         const { row, column } = target.cell;
         const disabled = (!action.startsWith("select-") && this.view.state.readOnly) ||
           ((action === "row-delete" || action === "row-up" || action === "row-down") && row === 0) ||
           (action === "row-before" && row === 0) ||
           (action === "row-up" && row <= 1) || (action === "row-down" && row >= target.table.rows.length - 1) ||
           (action === "column-left" && column === 0) || (action === "column-right" && column === target.table.columns - 1);
-        addButton(label, () => { runTableAction(this.view, action, target.cell); }, disabled);
+        addButton(parent, label, () => { runTableAction(this.view, action, target.cell); }, disabled);
+      };
+      if (target) {
+        for (const [group, label] of [["row", "行"], ["column", "列"]] as const) {
+          const button = addButton(menu, label, () => {
+            const alreadyOpen = this.submenuButton === button;
+            this.closeSubmenu();
+            if (alreadyOpen) { button.focus(); return; }
+            const submenu = document.createElement("div");
+            submenu.className = "popover mqm-table-menu mqm-table-submenu";
+            submenu.setAttribute("role", "menu");
+            submenu.setAttribute("aria-label", `${label}の操作`);
+            for (const [action, actionLabel] of menuActions) {
+              if (action.startsWith(`${group}-`) || action === `select-${group}` || (group === "column" && action.startsWith("sort-"))) addAction(submenu, action, actionLabel);
+            }
+            const alignmentLabel = document.createElement("div");
+            alignmentLabel.className = "mqm-table-menu-label";
+            alignmentLabel.textContent = "アライメント";
+            submenu.append(alignmentLabel);
+            for (const [action, actionLabel] of menuActions) if (action.startsWith("align-")) addAction(submenu, action, actionLabel);
+            menu.append(submenu);
+            this.submenu = submenu;
+            this.submenuButton = button;
+            button.setAttribute("aria-expanded", "true");
+            const parentRect = menu.getBoundingClientRect();
+            const buttonRect = button.getBoundingClientRect();
+            const childRect = submenu.getBoundingClientRect();
+            const left = parentRect.right + childRect.width <= window.innerWidth ? parentRect.right : parentRect.left - childRect.width;
+            submenu.style.left = `${Math.max(0, Math.min(left, window.innerWidth - childRect.width))}px`;
+            submenu.style.top = `${Math.max(0, Math.min(buttonRect.top, window.innerHeight - childRect.height))}px`;
+            submenu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+          }, false, false);
+          button.dataset.tableMenuGroup = group;
+          button.setAttribute("aria-haspopup", "menu");
+          button.setAttribute("aria-expanded", "false");
+          const arrow = document.createElement("span");
+          arrow.textContent = "›";
+          arrow.setAttribute("aria-hidden", "true");
+          button.append(arrow);
+        }
+        for (const [action, label] of menuActions) if (action === "select-cell" || action === "select-table") addAction(menu, action, label);
       }
-      else addButton("表を挿入", callbacks.onInsertTable);
+      else addButton(menu, "表を挿入", callbacks.onInsertTable);
       menu.addEventListener("keydown", event => {
-        const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        const activeMenu = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[role="menu"]') ?? menu : menu;
+        const buttons = [...activeMenu.querySelectorAll<HTMLButtonElement>(":scope > button:not(:disabled)")];
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-        if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); this.close(); this.view.focus(); }
+        if ((event.key === "Escape" || event.key === "ArrowLeft") && this.submenu) {
+          event.preventDefault(); event.stopPropagation();
+          const parentButton = this.submenuButton;
+          this.closeSubmenu(); parentButton?.focus();
+        } else if (event.key === "ArrowRight" && document.activeElement instanceof HTMLButtonElement && document.activeElement.dataset.tableMenuGroup) {
+          event.preventDefault(); event.stopPropagation();
+          if (this.submenuButton !== document.activeElement) document.activeElement.click();
+        } else if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); this.close(); this.view.focus(); }
         else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault(); event.stopPropagation(); buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
         }

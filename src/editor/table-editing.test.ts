@@ -11,6 +11,9 @@ import { tableEditing, runTableAction, selectTableCells, selectedTableText, past
 import { findTable } from "./tables";
 
 const views: EditorView[] = [];
+if (!window.Range.prototype.getClientRects) {
+  Object.defineProperty(window.Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+}
 const source = "| 項目 | 値 |\n| --- | --- |\n| 名前 | 2 |\n| 別名 | 10 |";
 function create(sourceText = source, position = sourceText.indexOf("項目"), readOnly = false): EditorView {
   const parent = document.createElement("div");
@@ -26,7 +29,7 @@ function create(sourceText = source, position = sourceText.indexOf("項目"), re
 function press(view: EditorView, key: string, shiftKey = false): boolean {
   return runScopeHandlers(view, new KeyboardEvent("keydown", { key, shiftKey }), "editor");
 }
-afterEach(() => { views.splice(0).forEach(view => view.destroy()); document.body.replaceChildren(); });
+afterEach(() => { views.splice(0).forEach(view => view.destroy()); vi.useRealTimers(); document.body.replaceChildren(); });
 
 describe("表の編集", () => {
   it("Tabで区切り線を飛ばし、末尾では行を追加する。1回のUndoで戻せる", () => {
@@ -150,11 +153,66 @@ describe("表の編集", () => {
     const view = create();
     view.dom.querySelector<HTMLElement>('[data-table-cell="0:0"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
-    const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")];
-    expect(buttons.find(button => button.textContent === "行を削除")?.disabled).toBe(true);
-    buttons.find(button => button.textContent === "列を右に挿入")!.click();
+    expect(menu.querySelectorAll(':scope > button')).toHaveLength(4);
+    expect(menu.textContent).not.toContain("行を削除");
+    menu.querySelector<HTMLButtonElement>('[data-table-menu-group="row"]')!.click();
+    const rowMenu = menu.querySelector<HTMLElement>('[aria-label="行の操作"]')!;
+    expect([...rowMenu.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "行を削除")?.disabled).toBe(true);
+    menu.querySelector<HTMLButtonElement>('[data-table-menu-group="column"]')!.click();
+    expect(menu.querySelector('[aria-label="行の操作"]')).toBeNull();
+    [...menu.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "列を右に挿入")!.click();
     expect(findTable(view.state, 0)?.columns).toBe(3);
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it.each(["row", "column"])("%sメニューのアライメントは同じ列へ適用する", group => {
+    const view = create();
+    view.dom.querySelector<HTMLElement>('[data-table-cell="1:1"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+    menu.querySelector<HTMLButtonElement>(`[data-table-menu-group="${group}"]`)!.click();
+    expect(menu.textContent).toContain("アライメント");
+    [...menu.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "中央寄せ")!.click();
+    expect(findTable(view.state, 0)?.alignments).toEqual(["left", "center"]);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    undo(view);
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it("サブメニューのキーボード移動と親への復帰に対応する", () => {
+    const view = create();
+    view.dom.querySelector<HTMLElement>('[data-table-cell="1:1"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const menu = document.querySelector<HTMLElement>('[aria-label="表の操作"]')!;
+    const rowButton = menu.querySelector<HTMLButtonElement>('[data-table-menu-group="row"]')!;
+    rowButton.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    expect(rowButton.getAttribute("aria-expanded")).toBe("true");
+    const child = menu.querySelector<HTMLElement>('[aria-label="行の操作"]')!;
+    const first = child.querySelector<HTMLButtonElement>("button:not(:disabled)")!;
+    expect(document.activeElement).toBe(first);
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    expect(document.activeElement).not.toBe(first);
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(menu.querySelector('[aria-label="行の操作"]')).toBeNull();
+    expect(document.activeElement).toBe(rowButton);
+    rowButton.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("閲覧モードではフォーカスがメニューへ移っても選択操作を維持する", async () => {
+    vi.useFakeTimers();
+    const view = create(source, 2, true);
+    view.focus();
+    view.dom.querySelector<HTMLElement>('[data-table-cell="1:1"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const menu = document.querySelector<HTMLElement>('[aria-label="表の操作"]')!;
+    const columnButton = menu.querySelector<HTMLButtonElement>('[data-table-menu-group="column"]')!;
+    columnButton.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true, cancelable: true }));
+    columnButton.focus();
+    await vi.runOnlyPendingTimersAsync();
+    expect(menu.isConnected).toBe(true);
+    columnButton.click();
+    const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")];
+    expect(buttons.find(button => button.textContent === "中央寄せ")?.disabled).toBe(true);
+    expect(buttons.find(button => button.textContent === "列を選択")?.disabled).toBe(false);
+    expect(view.state.doc.toString()).toBe(source);
   });
 
   it("HTML表の貼り付けでは文字と改行だけを保存する", () => {
