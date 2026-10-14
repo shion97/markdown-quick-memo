@@ -1,6 +1,7 @@
 mod clipboard;
 mod commands;
 mod document;
+mod external_links;
 mod launcher_protocol;
 mod lifecycle;
 mod pdf;

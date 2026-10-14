@@ -13,7 +13,6 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, State, WebviewWindow};
-use url::Url;
 
 const MAX_PREVIEW_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -332,36 +331,7 @@ pub fn open_pdf(
 
 #[tauri::command]
 pub fn open_external_url(url: String) -> Result<(), String> {
-    let parsed = Url::parse(&url).map_err(|_| "URLが不正です。".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
-        return Err("許可されていないURLスキームです。".to_string());
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-        let operation: Vec<u16> = "open\0".encode_utf16().collect();
-        let url_wide: Vec<u16> = std::ffi::OsStr::new(parsed.as_str())
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                url_wide.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        if result as isize <= 32 {
-            return Err("既定のアプリでURLを開けませんでした。".to_string());
-        }
-    }
-    Ok(())
+    crate::external_links::open_in_chrome(&url)
 }
 
 #[tauri::command]

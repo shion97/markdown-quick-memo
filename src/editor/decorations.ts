@@ -13,6 +13,9 @@ import {
   type ProtectedRange,
 } from "./math";
 import { parseQuotePrefix } from "./quote-prefix";
+import { markdownLink } from "./links";
+import { tableBreakRanges, tableFromLine, tableRowRanges, type TableAlignment } from "./tables";
+import { tableCellSelected, tableInteraction, tableInteractionEffect } from "./table-editing";
 
 class MathWidget extends WidgetType {
   constructor(
@@ -158,6 +161,11 @@ class EmptyTableCellWidget extends WidgetType {
   constructor(
     private readonly sourcePosition: number,
     private readonly heading: boolean,
+    private readonly tableFrom: number,
+    private readonly row: number,
+    private readonly column: number,
+    private readonly alignment: TableAlignment,
+    private readonly selected: boolean,
   ) {
     super();
   }
@@ -165,7 +173,9 @@ class EmptyTableCellWidget extends WidgetType {
   eq(other: EmptyTableCellWidget): boolean {
     return (
       this.sourcePosition === other.sourcePosition &&
-      this.heading === other.heading
+      this.heading === other.heading && this.tableFrom === other.tableFrom &&
+      this.row === other.row && this.column === other.column &&
+      this.alignment === other.alignment && this.selected === other.selected
     );
   }
 
@@ -174,10 +184,16 @@ class EmptyTableCellWidget extends WidgetType {
     cell.className = this.heading
       ? "mqm-table-cell mqm-table-cell-heading mqm-table-empty-cell"
       : "mqm-table-cell mqm-table-empty-cell";
-    cell.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      view.dispatch({ selection: { anchor: this.sourcePosition } });
-      view.focus();
+    if (this.selected) cell.classList.add("mqm-table-cell-selected");
+    cell.dataset.tableFrom = String(this.tableFrom);
+    cell.dataset.tableCell = `${this.row}:${this.column}`;
+    cell.style.textAlign = this.alignment;
+    // Editors without the table editing extension still need an empty-cell caret.
+    cell.addEventListener("mousedown", event => {
+      if (event.defaultPrevented || event.button !== 0 || event.shiftKey) return;
+      if (view.state.field(tableInteraction, false) === undefined) {
+        event.preventDefault(); view.dispatch({ selection: { anchor: this.sourcePosition } }); view.focus();
+      }
     });
     return cell;
   }
@@ -185,6 +201,10 @@ class EmptyTableCellWidget extends WidgetType {
   ignoreEvent(): boolean {
     return false;
   }
+}
+
+class TableBreakWidget extends WidgetType {
+  toDOM(): HTMLElement { return document.createElement("br"); }
 }
 
 interface DocumentSegment {
@@ -259,211 +279,36 @@ function insideFencedCode(state: EditorState, position: number): boolean {
   return false;
 }
 
-interface TableCellRange {
-  from: number;
-  to: number;
-  segmentFrom: number;
-  segmentTo: number;
-}
-
-export function tableRowRanges(line: {
-  from: number;
-  to: number;
-  text: string;
-}): { cells: TableCellRange[]; separators: number[] } {
-  const separators: number[] = [];
-  let escaped = false;
-  let inMath = false;
-  for (let index = 0; index < line.text.length; index += 1) {
-    const character = line.text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (character === "$") {
-      inMath = !inMath;
-      continue;
-    }
-    if (character === "|" && !inMath) {
-      separators.push(index);
-    }
-  }
-
-  const segments: { from: number; to: number }[] = [];
-  const firstSeparator = separators[0];
-  let segmentFrom =
-    firstSeparator !== undefined &&
-    line.text.slice(0, firstSeparator).trim().length === 0
-      ? firstSeparator + 1
-      : 0;
-  for (const separator of separators) {
-    if (separator >= segmentFrom) {
-      segments.push({ from: segmentFrom, to: separator });
-    }
-    segmentFrom = separator + 1;
-  }
-  if (
-    segmentFrom < line.text.length &&
-    line.text.slice(segmentFrom).trim().length > 0
-  ) {
-    segments.push({ from: segmentFrom, to: line.text.length });
-  }
-
-  return {
-    separators: separators.map((position) => line.from + position),
-    cells: segments.map((segment) => {
-      let from = segment.from;
-      let to = segment.to;
-      while (from < to && /[ \t]/.test(line.text[from] ?? "")) {
-        from += 1;
-      }
-      while (to > from && /[ \t]/.test(line.text[to - 1] ?? "")) {
-        to -= 1;
-      }
-      return {
-        from: line.from + from,
-        to: line.from + to,
-        segmentFrom: line.from + segment.from,
-        segmentTo: line.from + segment.to,
-      };
-    }),
-  };
-}
-
-function tableDecorations(
-  document: Text,
-  startLineNumber: number,
-  endLineNumber: number,
-): { entries: DecorationEntry[]; endLineNumber: number } | null {
-  if (startLineNumber + 1 > endLineNumber) {
-    return null;
-  }
-  const heading = document.line(startLineNumber);
-  const separator = document.line(startLineNumber + 1);
-  if (
-    !heading.text.includes("|") ||
-    !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(
-      separator.text,
-    )
-  ) {
-    return null;
-  }
-  const lines = [heading];
-  let lastLine = separator;
-  for (
-    let lineNumber = startLineNumber + 2;
-    lineNumber <= endLineNumber;
-    lineNumber += 1
-  ) {
-    const line = document.line(lineNumber);
-    if (!line.text.includes("|") || line.text.trim() === "") {
-      break;
-    }
-    lines.push(line);
-    lastLine = line;
-  }
-  const rows = lines.map(tableRowRanges);
-  const columnCount = Math.max(...rows.map((row) => row.cells.length));
-  const entries: DecorationEntry[] = [
-    {
-      from: separator.from,
-      to: separator.to,
-      decoration: Decoration.replace({ block: true }),
-    },
-  ];
-
-  rows.forEach((row, rowIndex) => {
-    const line = lines[rowIndex];
-    if (!line) {
-      return;
-    }
-    const headingRow = rowIndex === 0;
-    entries.push({
-      from: line.from,
-      to: line.from,
-      decoration: Decoration.line({
-        attributes: {
-          class: [
-            "mqm-table-row",
-            rowIndex === 0 ? "mqm-table-row-start" : "",
-            rowIndex === rows.length - 1 ? "mqm-table-row-end" : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
-          style: `--mqm-table-columns: ${columnCount}`,
-        },
-      }),
-    });
-    for (const separatorPosition of row.separators) {
-      entries.push({
-        from: separatorPosition,
-        to: separatorPosition + 1,
-        decoration: Decoration.replace({}),
-      });
-    }
-    row.cells.forEach((cell, cellIndex) => {
-      if (cell.segmentFrom < cell.from) {
-        entries.push({
-          from: cell.segmentFrom,
-          to: cell.from,
-          decoration: Decoration.replace({}),
-        });
-      }
-      if (cell.to < cell.segmentTo) {
-        entries.push({
-          from: cell.to,
-          to: cell.segmentTo,
-          decoration: Decoration.replace({}),
-        });
-      }
-      if (cell.from < cell.to) {
-        entries.push({
-          from: cell.from,
-          to: cell.to,
-          decoration: Decoration.mark({
-            class: headingRow
-              ? "mqm-table-cell mqm-table-cell-heading"
-              : "mqm-table-cell",
-          }),
-          allowOverlap: true,
-        });
-      } else {
-        entries.push({
-          from: cell.from,
-          to: cell.from,
-          decoration: Decoration.widget({
-            widget: new EmptyTableCellWidget(cell.from, headingRow),
-            side: cellIndex + 1,
-          }),
-        });
-      }
-    });
-    for (
-      let cellIndex = row.cells.length;
-      cellIndex < columnCount;
-      cellIndex += 1
-    ) {
-      entries.push({
-        from: line.to,
-        to: line.to,
-        decoration: Decoration.widget({
-          widget: new EmptyTableCellWidget(line.to, headingRow),
-          side: cellIndex + 1,
-        }),
-      });
+function tableDecorations(state: EditorState, startLineNumber: number): { entries: DecorationEntry[]; endLineNumber: number } | null {
+  const table = tableFromLine(state, startLineNumber);
+  if (!table) return null;
+  const entries: DecorationEntry[] = [{ from: table.separator.from, to: table.separator.to, decoration: Decoration.replace({ block: true }) }];
+  table.rows.forEach((row, rowIndex) => {
+    const line = row.line;
+    const heading = rowIndex === 0;
+    entries.push({ from: line.from, to: line.from, decoration: Decoration.line({ attributes: {
+      class: ["mqm-table-row", heading ? "mqm-table-row-start" : "", rowIndex === table.rows.length - 1 ? "mqm-table-row-end" : ""].filter(Boolean).join(" "),
+      style: `--mqm-table-columns: ${table.columns}`,
+    } }) });
+    for (const separator of tableRowRanges(line).separators) entries.push({ from: separator, to: separator + 1, decoration: Decoration.replace({}) });
+    for (let column = 0; column < table.columns; column += 1) {
+      const cell = row.cells[column];
+      const from = cell?.from ?? line.to;
+      const alignment = table.alignments[column]!;
+      const selected = tableCellSelected(state, table.from, rowIndex, column);
+      if (cell && cell.segmentFrom < cell.from) entries.push({ from: cell.segmentFrom, to: cell.from, decoration: Decoration.replace({}) });
+      if (cell && cell.to < cell.segmentTo) entries.push({ from: cell.to, to: cell.segmentTo, decoration: Decoration.replace({}) });
+      if (cell?.text) {
+        entries.push({ from, to: cell.to, allowOverlap: true, decoration: Decoration.mark({ inclusive: true,
+          class: ["mqm-table-cell", heading ? "mqm-table-cell-heading" : "", selected ? "mqm-table-cell-selected" : ""].filter(Boolean).join(" "),
+          attributes: { "data-table-from": String(table.from), "data-table-cell": `${rowIndex}:${column}`, style: `text-align: ${alignment}` },
+        }) });
+        for (const range of tableBreakRanges(cell.text)) entries.push({ from: cell.from + range.from, to: cell.from + range.to, decoration: Decoration.replace({ widget: new TableBreakWidget() }) });
+      } else entries.push({ from, to: from, decoration: Decoration.widget({ widget: new EmptyTableCellWidget(from, heading, table.from, rowIndex, column, alignment, selected), side: column + 1 }) });
     }
   });
-
-  return {
-    entries,
-    endLineNumber: lastLine.number,
-  };
+  return { entries, endLineNumber: state.doc.lineAt(table.to).number };
 }
-
 function orderedListNumber(
   document: Text,
   lineNumber: number,
@@ -529,7 +374,7 @@ function lineDecorations(
   let lineNumber = startLine;
 
   while (lineNumber <= endLine) {
-    const table = tableDecorations(document, lineNumber, endLine);
+    const table = tableDecorations(state, lineNumber);
     if (table) {
       results.push(...table.entries);
       lineNumber = table.endLineNumber + 1;
@@ -779,43 +624,25 @@ function linkDecorations(
     from: segment.from,
     to: segment.to,
     enter: (node) => {
-      if (node.name !== "Link") {
-        return;
-      }
-      const linkMarks: { from: number; to: number }[] = [];
-      let child = node.node.firstChild;
-      while (child) {
-        if (child.name === "LinkMark") {
-          linkMarks.push({ from: child.from, to: child.to });
-        }
-        child = child.nextSibling;
-      }
-      const openingMark = linkMarks[0];
-      const closingLabelMark = linkMarks[1];
-      if (
-        !openingMark ||
-        !closingLabelMark ||
-        openingMark.to >= closingLabelMark.from
-      ) {
-        return false;
-      }
+      const link = markdownLink(state, node.node);
+      if (!link || link.image || link.labelFrom >= link.labelTo) return;
 
       const active = editingTouches(state, node.from, node.to);
-      if (!active) {
+      if (!active && node.from < link.labelFrom) {
         results.push({
           from: node.from,
-          to: openingMark.to,
+          to: link.labelFrom,
           decoration: Decoration.replace({}),
         });
       }
       results.push({
-        from: openingMark.to,
-        to: closingLabelMark.from,
+        from: link.labelFrom,
+        to: link.labelTo,
         decoration: Decoration.mark({ class: "mqm-link-text" }),
       });
-      if (!active) {
+      if (!active && link.labelTo < node.to) {
         results.push({
-          from: closingLabelMark.from,
+          from: link.labelTo,
           to: node.to,
           decoration: Decoration.replace({}),
         });
@@ -1066,7 +893,7 @@ export const markdownDecorations = StateField.define<DecorationSet>({
     if (
       transaction.docChanged ||
       transaction.selection ||
-      transaction.reconfigured
+      transaction.reconfigured || transaction.effects.some(effect => effect.is(tableInteractionEffect))
     ) {
       return buildDecorations(transaction.state);
     }

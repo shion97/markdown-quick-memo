@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { backend } from "./bridge/tauri";
 import { MarkdownQuickMemoApplication } from "./app";
 import { selectedCopyText } from "./editor/editor";
+import { runTableAction, selectTableCells } from "./editor/table-editing";
 
 const dialogMocks = vi.hoisted(() => ({
   ask: vi.fn(),
@@ -65,6 +66,91 @@ function saveApplicationDocument(
 }
 
 describe("MarkdownQuickMemoApplication", () => {
+  it.each([false, true])("Ctrl＋クリックでリンクをバックエンドへ渡す（閲覧モード: %s）", async (previewOnly) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    for (const [source, expected] of [
+      ["[名前](https://example.com)", "https://example.com"],
+      ["[名前](https://example.com/a(b) \"タイトル\")", "https://example.com/a(b)"],
+      ["[名前](<https://example.com/a(b)>)", "https://example.com/a(b)"],
+      ["<https://example.com>", "https://example.com"],
+      ["https://example.com", "https://example.com"],
+    ]) {
+      setApplicationDocument(application, `${source}\n\n末尾`, null);
+      if (previewOnly && !view.state.readOnly) root.querySelector<HTMLButtonElement>("button[data-action='preview']")!.click();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      const before = view.state.selection;
+      vi.spyOn(view, "posAtCoords").mockReturnValue(source!.indexOf("名前") >= 0 ? source!.indexOf("名前") : 3);
+      view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true, button: 0 }));
+      await vi.waitFor(() => expect(openUrl).toHaveBeenLastCalledWith(expected));
+      expect(view.state.selection.eq(before)).toBe(true);
+      expect(view.state.doc.toString()).toBe(`${source}\n\n末尾`);
+    }
+  });
+
+  it.each([
+    ["[名前]", 2], ["[名前](https://example.com", 2],
+    ["`[名前](https://example.com)`", 3],
+    ["```\n[名前](https://example.com)\n```", 6],
+    ["$x+[名前](https://example.com)$", 6],
+  ] as const)("リンクでない文字列は開かない: %s", async (source, position) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, source, null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    vi.spyOn(view, "posAtCoords").mockReturnValue(position);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await Promise.resolve();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("Chrome起動エラーを画面に表示する", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "[名前](https://example.com)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    vi.spyOn(backend, "openExternalUrl").mockRejectedValue("Google Chromeが見つかりません。");
+    vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await vi.waitFor(() => expect(dialogMocks.message).toHaveBeenCalledWith("Google Chromeが見つかりません。", { title: "リンクを開けませんでした", kind: "error" }));
+  });
+
+  it.each([{ ctrlKey: false, button: 0 }, { ctrlKey: true, button: 2 }])("通常クリックと右クリックではリンクを開かない: %o", async (options) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "[名前](https://example.com)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ...options }));
+    await Promise.resolve();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("ローカル画像のCtrl＋クリックは既存の画像プレビューを開く", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "![画像](local.png)", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const imageData = vi.spyOn(backend, "localImageData").mockResolvedValue("data:image/png;base64,test");
+    const openUrl = vi.spyOn(backend, "openExternalUrl").mockResolvedValue();
+    const showModal = vi.fn();
+    for (const dialog of root.querySelectorAll("dialog")) dialog.showModal = showModal;
+    vi.spyOn(view, "posAtCoords").mockReturnValue(3);
+    view.contentDOM.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true }));
+    await vi.waitFor(() => expect(showModal).toHaveBeenCalledOnce());
+    expect(imageData).toHaveBeenCalledWith("local.png", expect.any(String));
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
   it("選択したMarkdown原文を改行区切りでコピー対象にする", () => {
     const source = "日本語😀\nfirst\nsecond";
     const state = EditorState.create({
@@ -138,6 +224,20 @@ describe("MarkdownQuickMemoApplication", () => {
       "クリップボードが使用中です",
       { title: "コピーできませんでした", kind: "error" },
     );
+  });
+
+  it("表の矩形コピーも既存のWindowsコピーAPIへ渡す", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    setApplicationDocument(application, "| a | b |\n| --- | --- |\n| **日本語** | x<br>y |", null);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const copyText = vi.spyOn(backend, "copyText").mockResolvedValue();
+    view.dispatch({ selection: { anchor: 2 } });
+    selectTableCells(view, { row: 1, column: 0 }, { row: 1, column: 1 });
+    view.contentDOM.dispatchEvent(new Event("copy", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(copyText).toHaveBeenCalledWith('**日本語**\t"x\ny"');
   });
 
   it("Juliaコードブロックを言語別にハイライトする", async () => {
@@ -299,6 +399,21 @@ describe("MarkdownQuickMemoApplication", () => {
     );
 
     expect(view.state.readOnly).toBe(true);
+  });
+
+  it("Ctrl+Tは行列指定を維持し、空の表を独立したブロックとして挿入する", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    new MarkdownQuickMemoApplication(root);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    view.dispatch({ changes: { from: 0, insert: "前後" }, selection: { anchor: 1 } });
+    const prompt = vi.spyOn(window, "prompt").mockReturnValueOnce("2").mockReturnValueOnce("1");
+    view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "t", ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(prompt).toHaveBeenNthCalledWith(1, "表の行数を入力してください。", "3");
+    expect(prompt).toHaveBeenNthCalledWith(2, "表の列数を入力してください。", "3");
+    expect(view.state.doc.toString()).toBe("前\n\n|  |\n| --- |\n|  |\n\n後");
+    expect(view.dom.querySelectorAll(".mqm-table-cell")).toHaveLength(2);
+    prompt.mockRestore();
   });
 
   it("Ctrl+Oでファイルを開き、Ctrl+Hで半透明表示を切り替える", async () => {
@@ -956,6 +1071,23 @@ describe("MarkdownQuickMemoApplication", () => {
 
     expect(saveDocument).not.toHaveBeenCalled();
     expect(dialogMocks.save).not.toHaveBeenCalled();
+  });
+
+  it("表の構造操作もMarkdown原文として自動保存する", async () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const application = new MarkdownQuickMemoApplication(root);
+    const path = "C:\\memo.md";
+    setApplicationDocument(application, "| a | b |\n| --- | --- |\n| c | d |", path);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const saveDocument = vi.spyOn(backend, "saveDocument").mockResolvedValue({ path, revision: 1 });
+    view.dispatch({ selection: { anchor: 2 } });
+    runTableAction(view, "column-after", { row: 0, column: 0 });
+    const source = "| a |  | b |\n| --- | --- | --- |\n| c |  | d |";
+    expect(view.state.doc.toString()).toBe(source);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(saveDocument).toHaveBeenCalledWith(source, 1, path, expect.any(String));
   });
 
   it("手動保存は即時実行し、待機中の自動保存を重複させない", async () => {

@@ -782,6 +782,33 @@ button.primary:active {
   box-sizing: border-box;
 }
 
+.mqm-table-cell-selected {
+  background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.mqm-table-menu {
+  position: fixed;
+  right: auto;
+  width: max-content;
+  max-width: 100vw;
+  max-height: 100vh;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.mqm-table-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mqm-table-menu-label {
+  margin-top: 2px;
+  padding: 4px 7px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .mqm-decoration-source {
   color: inherit;
   font: inherit;
