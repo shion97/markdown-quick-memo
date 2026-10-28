@@ -91,36 +91,32 @@ describe("複数文書のタブ", () => {
     expect(styles).toContain(
       ".tab-row:hover .tab-select,\n.tab-row:focus-within .tab-select { background: var(--surface-raised); }",
     );
-    expect(root.querySelector("button[data-action='toggle-tabs-pin'] svg")).not.toBeNull();
-    expect(styles).toContain("--tabs-compact-width: 60px;");
+    expect(root.querySelector("button[data-action='toggle-tabs-pin']")).toBeNull();
+    expect(styles).not.toContain("tabs-unpinned");
     expect(styles).toContain("margin: 0 0 12px; white-space: nowrap;");
     expect(styles).toContain("margin-bottom: 4px; white-space: nowrap;");
     expect(styles).toContain("-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);");
     expect(styles).toContain(
       ".tab-select[aria-selected=\"true\"] {\n  border-right-color: transparent; border-top-right-radius: 0; border-bottom-right-radius: 0;",
     );
-    expect(styles).toContain(":is(.tab-close, .tabs-pin)");
+    expect(styles).not.toContain(".tabs-pin");
   });
 
-  it("ピン状態を切り替えて保存し、次の起動時にピンOFFを復元する", () => {
+  it("以前のピンOFF設定があっても常時ピン止めし、切り替え操作を表示しない", () => {
+    window.localStorage.setItem("markdown-quick-memo:tabs-pinned", "false");
     const { root } = application();
     const workspace = root.querySelector<HTMLElement>("#workspace")!;
-    const pin = root.querySelector<HTMLButtonElement>("button[data-action='toggle-tabs-pin']")!;
+    Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 1400 });
+    window.dispatchEvent(new Event("resize"));
 
-    expect(pin.getAttribute("aria-pressed")).toBe("true");
+    expect(root.querySelector("button[data-action='toggle-tabs-pin']")).toBeNull();
     expect(workspace.classList.contains("tabs-unpinned")).toBe(false);
-    pin.click();
-    expect(pin.getAttribute("aria-pressed")).toBe("false");
-    expect(pin.getAttribute("aria-label")).toBe("タブ帯をピン止めする");
-    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
+    expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(false);
+    expect(root.querySelector("#tabs")?.hasAttribute("inert")).toBe(false);
     expect(window.localStorage.getItem("markdown-quick-memo:tabs-pinned")).toBe("false");
-
-    const restored = application();
-    expect(restored.root.querySelector("#workspace")?.classList.contains("tabs-unpinned")).toBe(true);
-    expect(restored.root.querySelector("button[data-action='toggle-tabs-pin']")?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("狭幅では自動退避を優先し、幅を戻すと保存済みのピン状態へ戻る", () => {
+  it("狭幅では自動退避し、幅を戻すと常時ピン止めへ戻る", () => {
     window.localStorage.setItem("markdown-quick-memo:tabs-pinned", "false");
     const { root } = application();
     const workspace = root.querySelector<HTMLElement>("#workspace")!;
@@ -128,12 +124,12 @@ describe("複数文書のタブ", () => {
     Object.defineProperty(workspace, "clientWidth", { configurable: true, get: () => workspaceWidth });
 
     window.dispatchEvent(new Event("resize"));
-    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(false);
     expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(true);
     workspaceWidth = 900;
     window.dispatchEvent(new Event("resize"));
     expect(workspace.classList.contains("tabs-auto-collapsed")).toBe(false);
-    expect(workspace.classList.contains("tabs-unpinned")).toBe(true);
+    expect(workspace.classList.contains("tabs-unpinned")).toBe(false);
   });
 
   it("Ctrl+Shift+Nで下に追加し、Ctrl+Kと上下キーで本文を切り替え、Enterで編集へ戻る", async () => {
@@ -183,8 +179,7 @@ describe("複数文書のタブ", () => {
     expect(workspace.style.getPropertyValue("--tabs-width")).toBe("240px");
   });
 
-  it("ピンOFFでもCtrl+Kの間だけタブ操作状態を開く", () => {
-    window.localStorage.setItem("markdown-quick-memo:tabs-pinned", "false");
+  it("Ctrl+Kでタブ操作を開始しEscapeで本文へ戻る", () => {
     const { app, root } = application();
     const tabs = root.querySelector("#tabs")!;
     key(app.activeTab.editor.contentDOM, "k");

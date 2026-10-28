@@ -1327,7 +1327,6 @@ dialog::backdrop {
 
 /* Both sidebars have independent adjustable widths and leave at least 560px for the editor. */
 .workspace {
-  --tabs-compact-width: 60px;
   --tabs-edge-width: 14px;
   padding-left: var(--tabs-width, 240px);
 }
@@ -1343,22 +1342,9 @@ dialog::backdrop {
   min-width: 0; margin: 0 0 12px; white-space: nowrap;
 }
 .tabs-panel h2 { min-width: 0; font-size: 14px; margin: 0; white-space: nowrap; }
-.tabs-pin {
-  display: grid; flex: 0 0 auto; place-items: center; width: 26px; height: 26px; padding: 0;
-  border-color: transparent; color: var(--muted); background: transparent;
-}
-.tabs-pin:hover { color: var(--text); background: var(--control-hover); }
-.tabs-pin svg { width: 16px; height: 16px; fill: currentColor; }
-.tabs-pin[aria-pressed="false"] svg { transform: rotate(-35deg); }
-.workspace.tabs-unpinned { padding-left: var(--tabs-compact-width); }
 .workspace.tabs-auto-collapsed { padding-left: 0; }
 .workspace.tabs-auto-collapsed:not(.tabs-open) .tabs-panel { visibility: hidden; }
-.tabs-unpinned .tabs-panel { width: var(--tabs-compact-width); padding-inline: 8px; }
 .tabs-auto-collapsed .tabs-panel { width: var(--tabs-edge-width); padding-inline: 0; }
-.tabs-unpinned .tabs-panel:hover,
-.tabs-unpinned .tabs-panel:focus-within,
-.tabs-unpinned .tabs-navigation-active,
-.tabs-unpinned .tabs-drag-over,
 .tabs-auto-collapsed .tabs-panel:hover,
 .tabs-auto-collapsed .tabs-panel:focus-within,
 .tabs-auto-collapsed .tabs-navigation-active,
@@ -1385,19 +1371,16 @@ dialog::backdrop {
 .tab-row:hover .tab-close,
 .tab-row:focus-within .tab-close { opacity: 1; pointer-events: auto; }
 .new-tab { width: 100%; }
-:is(.tabs-unpinned, .tabs-auto-collapsed):not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tab-select {
+.tabs-auto-collapsed:not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tab-select {
   padding-inline: 8px 4px; text-overflow: clip;
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
 }
-:is(.tabs-unpinned, .tabs-auto-collapsed):not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tab-select[aria-selected="true"] {
+.tabs-auto-collapsed:not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tab-select[aria-selected="true"] {
   border-right-color: transparent; border-top-right-radius: 0; border-bottom-right-radius: 0;
 }
-:is(.tabs-unpinned, .tabs-auto-collapsed):not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) :is(.tab-close, .tabs-pin) {
+.tabs-auto-collapsed:not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tab-close {
   visibility: hidden; opacity: 0; pointer-events: none;
-}
-:is(.tabs-unpinned, .tabs-auto-collapsed):not(.tabs-open) .tabs-panel:not(:hover):not(:focus-within):not(.tabs-navigation-active):not(.tabs-drag-over) .tabs-pin {
-  display: none;
 }
 @media print { .tabs-panel { display: none; } }
 

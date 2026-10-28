@@ -847,6 +847,10 @@ describe("MarkdownQuickMemoApplication", () => {
 
     view.dispatch({ changes: { from: 0, insert: "# 見出し" } });
     vi.advanceTimersByTime(120);
+    const outlineToggle = root.querySelector<HTMLButtonElement>("button[data-action='toggle-outline']")!;
+    if (outlineToggle.getAttribute("aria-expanded") !== "true") outlineToggle.click();
+    outlineToggle.click();
+    expect(workspace.classList.contains("has-outline")).toBe(false);
     editorContent.dispatchEvent(new KeyboardEvent("keydown", {
       key: "l",
       ctrlKey: true,
@@ -854,6 +858,8 @@ describe("MarkdownQuickMemoApplication", () => {
       cancelable: true,
     }));
 
+    expect(workspace.classList.contains("has-outline")).toBe(true);
+    expect(workspace.classList.contains("outline-closed")).toBe(false);
     const expandEvent = new KeyboardEvent("keydown", {
       key: "ArrowLeft",
       ctrlKey: true,

@@ -41,7 +41,6 @@ const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
 const AUTO_SAVE_DELAY_MS = 1_000;
 const MIN_EDITOR_WIDTH = 560;
-const TABS_PINNED_STORAGE_KEY = "markdown-quick-memo:tabs-pinned";
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -103,7 +102,6 @@ export class MarkdownQuickMemoApplication {
   private initialized = false;
   private windowLabel = "main";
   private tabsNavigationActive = false;
-  private tabsPinned = true;
   private tabsVisible: boolean | null = null;
   private outlineVisible: boolean | null = null;
   private operationPending = false;
@@ -138,7 +136,6 @@ export class MarkdownQuickMemoApplication {
   private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
-    this.tabsPinned = this.loadTabsPinned();
     this.root.innerHTML = this.layout();
     this.editorHost = this.required("#editor");
     this.workspace = this.required("#workspace");
@@ -154,39 +151,8 @@ export class MarkdownQuickMemoApplication {
     this.hotkeyStatus = this.required("#hotkey-status");
     this.createTab();
     this.bindActions();
-    this.updateTabsPinned();
     this.updateTabsWidth(0);
     this.updateOutlineWidth(0);
-  }
-
-  private loadTabsPinned(): boolean {
-    try {
-      return window.localStorage.getItem(TABS_PINNED_STORAGE_KEY) !== "false";
-    } catch {
-      return true;
-    }
-  }
-
-  private updateTabsPinned(): void {
-    this.workspace.classList.toggle("tabs-unpinned", !this.tabsPinned);
-    const button = this.required<HTMLButtonElement>("button[data-action='toggle-tabs-pin']");
-    const label = this.tabsPinned ? "タブ帯のピン止めを外す" : "タブ帯をピン止めする";
-    button.setAttribute("aria-pressed", String(this.tabsPinned));
-    button.setAttribute("aria-label", label);
-    button.title = label;
-  }
-
-  private toggleTabsPinned(): void {
-    this.tabsPinned = !this.tabsPinned;
-    this.tabsVisible = null;
-    try {
-      window.localStorage.setItem(TABS_PINNED_STORAGE_KEY, String(this.tabsPinned));
-    } catch {
-      // Storage can be unavailable in restricted webview contexts; keep the in-memory state.
-    }
-    this.updateTabsPinned();
-    this.updateTabPanel();
-    if (!this.tabsPinned) this.editor.focus();
   }
 
   private createTab(id: string = window.crypto.randomUUID()): DocumentTab {
@@ -694,11 +660,6 @@ export class MarkdownQuickMemoApplication {
           <aside id="tabs" class="tabs-panel" aria-label="タブ">
             <header class="tabs-header">
               <h2>タブ</h2>
-              <button type="button" data-action="toggle-tabs-pin" class="tabs-pin" aria-pressed="true" aria-label="タブ帯のピン止めを外す" title="タブ帯のピン止めを外す">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M8.5 3.5h7l-1 5 3 3v1.5h-4.75V21l-.75 1-.75-1v-8H6.5v-1.5l3-3-1-5Z" />
-                </svg>
-              </button>
             </header>
             <div id="tab-list" role="tablist" aria-orientation="vertical"></div>
             <button data-action="new-tab" class="new-tab" aria-label="新しいタブで新規">+</button>
@@ -875,7 +836,6 @@ export class MarkdownQuickMemoApplication {
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
-      "toggle-tabs-pin": () => this.toggleTabsPinned(),
       "toggle-tabs": () => this.togglePanel("tabs"),
       "toggle-outline": () => this.togglePanel("outline"),
       "window-minimize": () => getCurrentWindow().minimize(),
@@ -1456,8 +1416,9 @@ export class MarkdownQuickMemoApplication {
     this.outlineVisible = true;
     if (window.innerWidth < 1200) this.tabsVisible = false;
     this.outline.hidden = false;
+    this.workspace.classList.add("has-outline");
     this.outline.classList.add("outline-navigation-active");
-    this.updatePanelControls();
+    this.updateTabPanel();
     this.selectOutlineButton(first, true);
   }
 
@@ -1569,7 +1530,7 @@ export class MarkdownQuickMemoApplication {
   }
 
   private updatePanelControls(): void {
-    const tabsOpen = this.tabsVisible ?? (this.tabsPinned && !this.workspace.classList.contains("tabs-auto-collapsed"));
+    const tabsOpen = this.tabsVisible ?? !this.workspace.classList.contains("tabs-auto-collapsed");
     const outlineOpen = this.outlineVisible ?? (!this.outline.hidden && window.innerWidth >= 1200);
     for (const [panel, open, explicit, shortcut] of [
       ["tabs", tabsOpen, this.tabsVisible, "Ctrl+K"],
