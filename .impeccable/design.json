@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-28T09:53:17.1557962Z",
+  "title": "Design System: Markdown Quick Memo",
+  "extensions": {
+    "colorMeta": {
+      "app-background": {
+        "role": "neutral",
+        "displayName": "淡い室内灰",
+        "canonical": "#f3f4f6",
+        "tonalRamp": ["#20242b", "#343a44", "#555d68", "#7a838e", "#a7adb5", "#c7cbd0", "#e0e2e5", "#f3f4f6"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "校正紙",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#20242b", "#343a44", "#555d68", "#7a838e", "#a7adb5", "#c7cbd0", "#e7e8ea", "#ffffff"]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "淡い補助紙",
+        "canonical": "#eef0f3",
+        "tonalRamp": ["#20242b", "#343a44", "#555d68", "#7a838e", "#a7adb5", "#c7cbd0", "#dfe2e6", "#eef0f3"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "青みの墨",
+        "canonical": "#263345",
+        "tonalRamp": ["#121a27", "#182436", "#263345", "#3d4c60", "#596779", "#8290a0", "#b7c0cb", "#edf1f6"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "控えめな注記",
+        "canonical": "#596779",
+        "tonalRamp": ["#1b2531", "#2e3b4a", "#465568", "#596779", "#778596", "#9ba6b2", "#c4cbd2", "#eef1f4"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "細い罫線",
+        "canonical": "#d9dfe7",
+        "tonalRamp": ["#252d38", "#414b59", "#626e7c", "#89939f", "#aeb7c2", "#c5ccd5", "#d9dfe7", "#f4f5f7"]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "操作境界",
+        "canonical": "#bdc8d8",
+        "tonalRamp": ["#202b3b", "#344256", "#53647a", "#718197", "#95a4b7", "#aab8c8", "#bdc8d8", "#f0f3f7"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "青みの墨",
+        "canonical": "#405675",
+        "tonalRamp": ["#101b2c", "#1a2a40", "#273a53", "#334762", "#405675", "#6e83a1", "#a5b6ce", "#edf2fa"]
+      },
+      "focus-ring": {
+        "role": "primary",
+        "displayName": "キーボード輪郭",
+        "canonical": "#245cc4",
+        "tonalRamp": ["#0d214d", "#123b86", "#245cc4", "#4179d7", "#6e99e4", "#9bb8ef", "#c3d4f7", "#edf3ff"]
+      },
+      "selection": {
+        "role": "primary",
+        "displayName": "淡い青灰",
+        "canonical": "#e8edf3",
+        "tonalRamp": ["#1b2635", "#334254", "#536579", "#7d8d9e", "#a9b6c5", "#c5ced9", "#d8e0e9", "#e8edf3"]
+      },
+      "error": {
+        "role": "tertiary",
+        "displayName": "失敗の赤",
+        "canonical": "#a52234",
+        "tonalRamp": ["#3b0912", "#681321", "#8b1e2e", "#a52234", "#c24a58", "#d97a85", "#ebadb4", "#fff0f1"]
+      },
+      "error-surface": {
+        "role": "tertiary",
+        "displayName": "失敗の淡色面",
+        "canonical": "#fff0f1",
+        "tonalRamp": ["#3b0912", "#681321", "#8b1e2e", "#a52234", "#c24a58", "#d97a85", "#ebadb4", "#fff0f1"]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "保存済みの緑",
+        "canonical": "#286049",
+        "tonalRamp": ["#0b291d", "#12402c", "#1b5138", "#286049", "#4a8068", "#79a38f", "#b2c9bd", "#edf7f1"]
+      },
+      "on-accent": {
+        "role": "neutral",
+        "displayName": "アクセント上の白",
+        "canonical": "white",
+        "tonalRamp": ["#1b1d21", "#363a40", "#555b64", "#777e87", "#989fa7", "#b8bdc3", "#d9dce0", "#ffffff"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "校正紙の見出し",
+        "purpose": "Markdown H1 の主見出し。Yu Mincho 系で本文の開始点を示す。"
+      },
+      "body": {
+        "displayName": "日本語本文",
+        "purpose": "CodeMirror が保持する Markdown 原文を16px・行間1.75で編集する。"
+      },
+      "label": {
+        "displayName": "操作ラベル",
+        "purpose": "保存状態、パネル見出し、ステータスバーなどの補助情報に使う。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "surface-lift-light",
+        "value": "0 8px 22px rgb(40 52 70 / 12%)",
+        "purpose": "ライトテーマのメニュー、検索面、ダイアログを一時的に浮かせる。"
+      },
+      {
+        "name": "surface-lift-dark",
+        "value": "0 8px 28px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%)",
+        "purpose": "ダークテーマの一時面に使う二重の柔らかな影。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-state",
+        "value": "120ms ease",
+        "purpose": "ボタンの背景、境界、文字色の状態遷移。"
+      },
+      {
+        "name": "panel-slide",
+        "value": "140ms ease-out",
+        "purpose": "狭幅でタブ・目次を重ねて開くときの横移動。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce",
+        "purpose": "利用者が動きを減らす設定を選んだ場合は遷移を無効にする。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "outline-docked",
+        "value": "1200px",
+        "purpose": "これ以上では目次を右の固定グリッド列にする。"
+      },
+      {
+        "name": "toolbar-compact",
+        "value": "640px",
+        "purpose": "これ以下ではツールバーの余白とウィンドウ操作を縮める。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "保存や設定の確定に使う青みの墨の主操作ボタン。",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">設定</button>",
+      "css": ".ds-btn-primary { color: white; border: 1px solid var(--accent); border-radius: var(--radius-control); padding: 7px 12px; background: var(--accent); cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; } .ds-btn-primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); } .ds-btn-primary:active { border-color: var(--accent-pressed); background: var(--accent-pressed); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-btn-primary:disabled { color: color-mix(in srgb, var(--muted) 65%, transparent); cursor: default; }"
+    },
+    {
+      "name": "Quiet Panel Toggle",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "タブや目次を本文から退避・表示する静かな補助操作。",
+      "html": "<button class=\"ds-btn-quiet\" type=\"button\" aria-expanded=\"false\">目次</button>",
+      "css": ".ds-btn-quiet { color: var(--text); border: 1px solid transparent; border-radius: var(--radius-control); padding: 5px 7px; background: transparent; font-size: 13px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; } .ds-btn-quiet:hover, .ds-btn-quiet:focus-visible, .ds-btn-quiet[aria-expanded=\"true\"] { border-color: var(--border-strong); background: var(--control-hover); } .ds-btn-quiet[aria-expanded=\"true\"] { color: var(--accent); background: var(--selection); } .ds-btn-quiet:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Save Status",
+      "kind": "custom",
+      "refersTo": "save-status",
+      "description": "文書ごとの保存状態を短い文言で示すステータス。",
+      "html": "<span class=\"ds-save-status\" data-state=\"saved\" role=\"status\">保存済み</span>",
+      "css": ".ds-save-status { display: inline-block; padding: 4px 7px; border-radius: var(--radius-control); color: var(--muted); background: var(--selection); font-size: 12px; white-space: nowrap; } .ds-save-status[data-state=\"saved\"] { color: var(--success); } .ds-save-status[data-state=\"error\"] { color: var(--error); background: var(--error-surface); }"
+    },
+    {
+      "name": "Save Error Banner",
+      "kind": "custom",
+      "refersTo": "save-error",
+      "description": "保存失敗の原因と再試行を本文の上に保つ通知帯。",
+      "html": "<div class=\"ds-save-error\" role=\"alert\"><span>保存できませんでした：書き込みに失敗しました</span><button class=\"ds-error-retry\" type=\"button\">再試行</button></div>",
+      "css": ".ds-save-error { display: flex; align-items: center; gap: 12px; max-height: 25vh; padding: 8px 14px; overflow-y: auto; color: var(--error); background: var(--error-surface); font-size: 13px; } .ds-save-error span { flex: 1; min-width: 0; overflow-wrap: anywhere; } .ds-error-retry { flex: 0 0 auto; padding: 7px 12px; color: white; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent); font: inherit; cursor: pointer; } .ds-error-retry:hover { border-color: var(--accent-hover); background: var(--accent-hover); } .ds-error-retry:active { border-color: var(--accent-pressed); background: var(--accent-pressed); } .ds-error-retry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "設定ダイアログや検索で使う、罫線付きの入力欄。",
+      "html": "<label class=\"ds-input-label\">ホットキー<input class=\"ds-input-field\" value=\"Ctrl+Alt+M\" /></label>",
+      "css": ".ds-input-label { display: grid; gap: 6px; color: var(--text); font-size: 14px; } .ds-input-field { width: 100%; padding: 9px 10px; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--control); font: inherit; } .ds-input-field:hover { border-color: var(--border-strong); } .ds-input-field:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Tab Item",
+      "kind": "nav",
+      "refersTo": "tab-item",
+      "description": "左の文書帯で長いファイル名を省略表示するタブ。",
+      "html": "<button class=\"ds-tab-item\" type=\"button\" aria-selected=\"true\">開発ノートと次回の検討事項.md</button>",
+      "css": ".ds-tab-item { width: 100%; min-width: 0; padding: 5px 36px 5px 7px; overflow: hidden; color: var(--text); border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; } .ds-tab-item:hover, .ds-tab-item:focus-visible { background: var(--surface-raised); } .ds-tab-item[aria-selected=\"true\"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--surface-raised) 55%, var(--tabs-background)); } .ds-tab-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Outline Item",
+      "kind": "nav",
+      "refersTo": "outline-item",
+      "description": "右の目次で見出しへ移動する12pxの本文案内。",
+      "html": "<button class=\"ds-outline-item\" type=\"button\" aria-current=\"location\">今回の判断</button>",
+      "css": ".ds-outline-item { width: 100%; padding: 5px 7px; color: var(--muted); border: 0; border-radius: var(--radius-control); background: transparent; font-size: 12px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; } .ds-outline-item:hover { color: var(--text); background: var(--control-hover); } .ds-outline-item[aria-current=\"location\"] { color: var(--text); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); } .ds-outline-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Command Popover",
+      "kind": "nav",
+      "refersTo": "menu-popover",
+      "description": "実行項目とショートカットをまとめる一時メニュー。",
+      "html": "<div class=\"ds-menu-popover\" role=\"menu\"><button class=\"ds-menu-item\" type=\"button\"><span>保存</span><kbd class=\"ds-menu-key\">Ctrl+S</kbd></button></div>",
+      "css": ".ds-menu-popover { display: grid; width: min(360px, calc(100vw - 28px)); max-height: calc(100vh - 80px); padding: 6px; overflow-y: auto; border: 0; border-radius: var(--radius-surface); background: var(--surface-raised); box-shadow: var(--shadow); } .ds-menu-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 9px; color: var(--text); border: 0; border-radius: var(--radius-control); background: transparent; font-size: 13px; text-align: left; cursor: pointer; } .ds-menu-item:hover { background: var(--control-hover); } .ds-menu-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-menu-key { padding: 1px 5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; background: var(--surface-muted); font: inherit; font-size: 12px; white-space: nowrap; }"
+    },
+    {
+      "name": "Editor Paper",
+      "kind": "custom",
+      "refersTo": "editor-paper",
+      "description": "CodeMirror の本文を載せる最大800pxの平面。",
+      "html": "<article class=\"ds-editor-paper\"><h1>開発ノートと次回の検討事項</h1><p>Markdown原文を保ち、いつでも読み書きを再開できます。</p></article>",
+      "css": ".ds-editor-paper { max-width: 800px; min-height: 100%; margin: 0 auto; padding: 42px clamp(24px, 5vw, 62px) 76px; color: var(--text); background: var(--surface); font: 400 16px/1.75 \"BIZ UDGothic\", \"Yu Gothic UI\", \"Segoe UI\", sans-serif; } .ds-editor-paper h1 { margin: 0 0 12px; padding-bottom: 0.25em; color: var(--text); border-bottom: 1px solid var(--border); font: 700 1.72em/1.35 \"Yu Mincho\", \"Iowan Old Style\", serif; } .ds-editor-paper p { margin: 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "静かな校正紙",
+    "overview": "これはホットキーから入力を再開し、保存状態を確認して元の作業へ戻るための Operate 系エディタである。白い本文面を中心に、淡いグレーの補助領域と青みの墨色を置く。UI の密度は作業を止めない程度に抑え、タブ・目次・メニューは必要なときだけ前面に出す。\n\n本文は CodeMirror が Markdown 原文の所有権を持つ。日本語本文の読みやすさ、コード・表・数式の原文保持を優先し、装飾は本文の意味を補助する範囲に留める。ライト／ダークは OS 設定に追従し、狭幅では補助パネルを本文に重ねて編集領域を守る。",
+    "keyCharacteristics": [
+      "白い校正紙と青みの墨色による静かなコントラスト",
+      "最大800pxの本文と、固定された上部・下部情報帯",
+      "240〜480pxの補助パネルを必要時だけ開く構成",
+      "保存状態、フォーカス、失敗を色だけに頼らず文言でも示す"
+    ],
+    "rules": [
+      {
+        "name": "The Blue-Ink Scarcity Rule",
+        "body": "青みの墨は操作対象、選択、リンク、重要な状態にだけ使い、面全体の装飾やグラデーションには使わない。",
+        "section": "colors"
+      },
+      {
+        "name": "The Source-Owner Rule",
+        "body": "Markdown 原文、コード、表、数式の入力と選択は CodeMirror の文字組みを所有者とし、見た目のために別の本文を重ねない。",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "常設の本文・タブ・目次には影を置かず、浮遊面の状態にだけ影を許可する。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 本文を最大800pxに収め、上下の情報帯と補助パネルの位置を毎画面で固定する。",
+      "Do OS のライト／ダーク設定に合わせて、白／淡いグレーと青みのダーク面を対で使う。",
+      "Do 保存、フォーカス、エラー、空文書を文言でも伝え、色だけに意味を持たせない。",
+      "Do 補助パネルを必要時だけ開き、狭幅では本文を横へ押さない。",
+      "Do Markdown 原文、表、コード、数式の編集を CodeMirror に委ねる。"
+    ],
+    "donts": [
+      "Don't グラデーション、厚い左右罫線、常設カード影、装飾的な新しいピル形状を追加しない。",
+      "Don't 本文の代わりに別のプレビュー文字列を重ねたり、原文の入力・Undo・保存へ案内文を混入させたりしない。",
+      "Don't アクセント色を面全体へ広げず、操作対象と状態以外を青くしない。",
+      "Don't OS の IME、表示倍率、実ホットキーの受け入れ確認をブラウザーの模擬保存結果だけで済ませない。"
+    ]
+  }
+}

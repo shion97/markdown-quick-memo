@@ -1,4 +1,6 @@
 import type { EditorView } from "@codemirror/view";
+import { undo, redo } from "@codemirror/commands";
+import { openSearchPanel } from "@codemirror/search";
 import { insertMarkdownTable } from "./editor/table-editing";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
@@ -39,7 +41,6 @@ const OUTLINE_MAX_WIDTH = 480;
 const OUTLINE_WIDTH_STEP = 40;
 const AUTO_SAVE_DELAY_MS = 1_000;
 const MIN_EDITOR_WIDTH = 560;
-const TABS_PINNED_STORAGE_KEY = "markdown-quick-memo:tabs-pinned";
 
 function fileName(path: string | null): string {
   if (!path) {
@@ -78,6 +79,8 @@ interface DocumentTab {
   revision: RevisionTracker;
   timer: number | undefined;
   saving: Promise<boolean> | null;
+  savePending: boolean;
+  saveError: string | null;
   collapsed: Set<string>;
   scrollTop: number;
   scrollLeft: number;
@@ -99,7 +102,8 @@ export class MarkdownQuickMemoApplication {
   private initialized = false;
   private windowLabel = "main";
   private tabsNavigationActive = false;
-  private tabsPinned = true;
+  private tabsVisible: boolean | null = null;
+  private outlineVisible: boolean | null = null;
   private operationPending = false;
   private exitLocked = false;
   private transferring: DocumentTab | null = null;
@@ -132,7 +136,6 @@ export class MarkdownQuickMemoApplication {
   private outlineNavigationHold: { key: string; startedAt: number } | null = null;
 
   constructor(private readonly root: HTMLElement) {
-    this.tabsPinned = this.loadTabsPinned();
     this.root.innerHTML = this.layout();
     this.editorHost = this.required("#editor");
     this.workspace = this.required("#workspace");
@@ -148,37 +151,8 @@ export class MarkdownQuickMemoApplication {
     this.hotkeyStatus = this.required("#hotkey-status");
     this.createTab();
     this.bindActions();
-    this.updateTabsPinned();
     this.updateTabsWidth(0);
     this.updateOutlineWidth(0);
-  }
-
-  private loadTabsPinned(): boolean {
-    try {
-      return window.localStorage.getItem(TABS_PINNED_STORAGE_KEY) !== "false";
-    } catch {
-      return true;
-    }
-  }
-
-  private updateTabsPinned(): void {
-    this.workspace.classList.toggle("tabs-unpinned", !this.tabsPinned);
-    const button = this.required<HTMLButtonElement>("button[data-action='toggle-tabs-pin']");
-    const label = this.tabsPinned ? "タブ帯のピン止めを外す" : "タブ帯をピン止めする";
-    button.setAttribute("aria-pressed", String(this.tabsPinned));
-    button.setAttribute("aria-label", label);
-    button.title = label;
-  }
-
-  private toggleTabsPinned(): void {
-    this.tabsPinned = !this.tabsPinned;
-    try {
-      window.localStorage.setItem(TABS_PINNED_STORAGE_KEY, String(this.tabsPinned));
-    } catch {
-      // Storage can be unavailable in restricted webview contexts; keep the in-memory state.
-    }
-    this.updateTabsPinned();
-    if (!this.tabsPinned) this.editor.focus();
   }
 
   private createTab(id: string = window.crypto.randomUUID()): DocumentTab {
@@ -187,13 +161,15 @@ export class MarkdownQuickMemoApplication {
     this.editorHost.append(host);
     const tab: DocumentTab = {
       id, host, editor: undefined as unknown as EditorView, path: null,
-      revision: new RevisionTracker(), timer: undefined, saving: null, collapsed: new Set(), scrollTop: 0, scrollLeft: 0,
+      revision: new RevisionTracker(), timer: undefined, saving: null, savePending: false, saveError: null,
+      collapsed: new Set(), scrollTop: 0, scrollLeft: 0,
     };
     tab.editor = createEditor(host, {
       onDocumentChanged: () => {
         if (!this.suppressChanges && this.tabs.includes(tab)) {
           tab.revision.changed();
           this.updateTitle();
+          if (tab === this.activeTab) this.updateEmptyHint();
           this.scheduleAutoSave(tab);
         }
       },
@@ -225,6 +201,7 @@ export class MarkdownQuickMemoApplication {
     this.updateTitle();
     this.updateDocumentSummary(tab.editor.state.doc.toString());
     this.updatePreviewButton();
+    this.updateEmptyHint();
     if (previous !== tab) tab.editor.requestMeasure({ read: () => null, write: () => {
       if (this.activeTab !== tab) return;
       tab.editor.scrollDOM.scrollTop = tab.scrollTop;
@@ -270,8 +247,10 @@ export class MarkdownQuickMemoApplication {
   }
 
   private stopTabNavigation(): void {
+    if (this.tabsNavigationActive && this.tabsVisible !== false) this.tabsVisible = null;
     this.tabsNavigationActive = false;
     this.required("#tabs").classList.remove("tabs-navigation-active");
+    this.updatePanelControls();
   }
 
   private handleTabShortcut(event: KeyboardEvent): boolean {
@@ -285,8 +264,11 @@ export class MarkdownQuickMemoApplication {
         if (this.tabsNavigationActive) { this.stopTabNavigation(); this.editor.focus(); }
         else {
           if (this.outlineNavigationActive) this.stopOutlineNavigation();
+          this.tabsVisible = true;
+          this.updatePanelControls();
           this.tabsNavigationActive = true;
           this.required("#tabs").classList.add("tabs-navigation-active");
+          this.updatePanelControls();
           this.focusTabButton();
         }
       };
@@ -588,6 +570,7 @@ export class MarkdownQuickMemoApplication {
       <main class="application-shell">
         <header class="toolbar" data-tauri-drag-region>
           <div class="brand" data-tauri-drag-region>
+            <button data-action="toggle-tabs" class="panel-toggle" aria-controls="tabs" aria-expanded="false" title="タブを開く（Ctrl+Kで操作）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg><span>タブ</span></button>
             <svg class="document-file-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-tauri-drag-region>
               <path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
               <path d="M14 3v5h5M4 6H3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12" />
@@ -595,20 +578,19 @@ export class MarkdownQuickMemoApplication {
             <strong id="document-title" data-tauri-drag-region>無題.md</strong>
           </div>
           <div class="toolbar-actions">
-            <div class="document-status" aria-label="文書情報">
-              <span id="cursor-position">1行 1列</span>
-              <span aria-hidden="true">/</span>
-              <span id="status">0 文字 / 0 語</span>
-            </div>
+            <span id="save-status" class="save-status" role="status" aria-live="polite" title="初回保存が必要です">未保存 · 初回保存</span>
             <button data-action="preview" class="mode-toggle" aria-pressed="false" aria-label="閲覧モードに切り替える" title="閲覧モードに切り替える"></button>
-            <button data-action="more" class="icon-button" aria-label="ショートカット一覧" aria-expanded="false">•••</button>
+            <button data-action="toggle-outline" class="panel-toggle" aria-controls="outline" aria-expanded="false" title="目次を開く（Ctrl+Lで操作）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg><span>目次</span></button>
+            <button data-action="more" class="icon-button" aria-label="メニュー" aria-controls="more-menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
             <div class="window-controls" aria-label="ウィンドウ操作">
               <button data-action="window-minimize" class="window-control" aria-label="最小化"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 10h14" /></svg></button>
               <button data-action="window-maximize" class="window-control" aria-label="最大化または元のサイズに戻す"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="13" height="13" /></svg></button>
               <button data-action="window-close" class="window-control window-close" aria-label="閉じる"><svg class="window-control-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m4 4 12 12M16 4 4 16" /></svg></button>
             </div>
           </div>
-          <div id="more-menu" class="popover" hidden>
+          <div id="more-menu" class="popover" aria-label="アプリの操作" hidden>
+            <div id="command-menu">
+            <div class="menu-scroll">
             <section class="popover-group" aria-labelledby="shortcut-file-heading">
               <h2 id="shortcut-file-heading">ファイル</h2>
               <button data-action="new"><span>新規</span><kbd>Ctrl+N</kbd></button>
@@ -624,45 +606,65 @@ export class MarkdownQuickMemoApplication {
             </section>
             <section class="popover-group" aria-labelledby="shortcut-edit-heading">
               <h2 id="shortcut-edit-heading">編集</h2>
-              <div class="shortcut-row"><span>元に戻す / やり直す</span><kbd>Ctrl+Z / Ctrl+Y</kbd></div>
-              <div class="shortcut-row"><span>検索</span><kbd>Ctrl+F</kbd></div>
-              <div class="shortcut-row"><span>表を挿入</span><kbd>Ctrl+T</kbd></div>
-              <div class="shortcut-row"><span>太字 / 斜体</span><kbd>Ctrl+B / Ctrl+I</kbd></div>
-              <div class="shortcut-row"><span>取り消し線</span><kbd>Ctrl+X</kbd></div>
-              <div class="shortcut-row"><span>字下げ / 字上げ</span><kbd>Tab / Shift+Tab</kbd></div>
-              <div class="shortcut-row"><span>単純改行</span><kbd>Shift+Enter</kbd></div>
-              <div class="shortcut-row"><span>リンク・画像を開く</span><kbd>Ctrl+クリック</kbd></div>
+              <button data-action="undo" data-edit-command><span>元に戻す</span><kbd>Ctrl+Z</kbd></button>
+              <button data-action="redo" data-edit-command><span>やり直す</span><kbd>Ctrl+Y</kbd></button>
+              <button data-action="search"><span>検索</span><kbd>Ctrl+F</kbd></button>
+              <button data-action="insert-table" data-edit-command><span>表を挿入</span><kbd>Ctrl+T</kbd></button>
+              <button data-action="bold" data-edit-command><span>太字</span><kbd>Ctrl+B</kbd></button>
+              <button data-action="italic" data-edit-command><span>斜体</span><kbd>Ctrl+I</kbd></button>
+              <button data-action="strike" data-edit-command><span>取り消し線</span><kbd>Ctrl+X</kbd></button>
             </section>
             <section class="popover-group" aria-labelledby="shortcut-window-heading">
-              <h2 id="shortcut-window-heading">表示・終了</h2>
-              <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
+              <h2 id="shortcut-window-heading">表示</h2>
               <button data-action="preview"><span>閲覧 / 編集モード</span><kbd>Ctrl+M</kbd></button>
-              <div class="shortcut-row"><span>タブを操作 / 編集へ戻る</span><kbd>Ctrl+K</kbd></div>
-              <div class="shortcut-row"><span>タブを移動</span><kbd>Ctrl+↑ / Ctrl+↓</kbd></div>
-              <div class="shortcut-row"><span>タブ幅を縮小 / 拡大</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
-              <div class="shortcut-row"><span>目次を操作 / 編集へ戻る</span><kbd>Ctrl+L</kbd></div>
-              <div class="shortcut-row"><span>目次幅を拡大 / 縮小</span><kbd>Ctrl+← / Ctrl+→</kbd></div>
+              <button data-action="toggle-tabs"><span>タブを開く / 閉じる</span></button>
+              <button data-action="toggle-outline"><span>目次を開く / 閉じる</span></button>
               <button data-action="opacity"><span>半透明表示</span><kbd>Ctrl+H</kbd></button>
               <button data-action="hide"><span>待機状態へ戻す</span><kbd>Ctrl+Q</kbd></button>
-              <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
             </section>
-            <button data-action="settings" class="popover-settings"><span>ホットキー設定</span></button>
+            </div>
+            <div class="menu-footer">
+              <button data-action="shortcuts"><span>ショートカット一覧</span></button>
+              <button data-action="settings"><span>ホットキー設定</span></button>
+              <button data-action="exit"><span>完全に終了</span><kbd>Alt+F4</kbd></button>
+            </div>
+            </div>
+            <div id="shortcut-list" hidden>
+              <button data-action="commands"><span>操作メニューへ戻る</span></button>
+              <h2>ショートカット一覧</h2>
+              <div class="shortcut-row"><span>アプリを表示</span><kbd id="app-hotkey-shortcut">Ctrl+Alt+M</kbd></div>
+              ${[
+                ["新規 / 開く", "Ctrl+N / Ctrl+O"],
+                ["新しいタブで新規 / 開く", "Ctrl+Shift+N / Ctrl+Shift+O"],
+                ["保存 / 名前を付けて保存", "Ctrl+S / Ctrl+Shift+S"],
+                ["ファイル名を変更 / 保存先を開く", "Ctrl+R / Ctrl+E"],
+                ["PDFへ書き出す", "Ctrl+P"],
+                ["元に戻す / やり直す", "Ctrl+Z / Ctrl+Y"],
+                ["検索 / 表を挿入", "Ctrl+F / Ctrl+T"],
+                ["太字 / 斜体", "Ctrl+B / Ctrl+I"], ["取り消し線", "Ctrl+X"],
+                ["字下げ / 字上げ", "Tab / Shift+Tab"], ["単純改行", "Shift+Enter"],
+                ["リンク・画像を開く", "Ctrl+クリック"],
+                ["タブを操作 / 編集へ戻る", "Ctrl+K"], ["タブを閉じる", "Ctrl+D"],
+                ["タブ・目次の項目移動", "Ctrl+↑ / Ctrl+↓"],
+                ["タブ・目次の幅を変更", "Ctrl+← / Ctrl+→"],
+                ["タブから編集へ戻る", "Enter / Esc"],
+                ["目次を操作 / 編集へ戻る", "Ctrl+L"],
+                ["閲覧 / 編集モード", "Ctrl+M"], ["半透明表示", "Ctrl+H"],
+                ["待機状態へ戻す", "Ctrl+Q"], ["完全に終了", "Alt+F4"],
+              ].map(([label, shortcut]) => `<div class="shortcut-row"><span>${label}</span><kbd>${shortcut}</kbd></div>`).join("")}
+            </div>
           </div>
         </header>
+        <div id="save-error" class="save-error" role="alert" hidden><span id="save-error-message"></span><button data-action="retry-save">再試行</button></div>
         <section id="workspace" class="workspace">
           <aside id="tabs" class="tabs-panel" aria-label="タブ">
             <header class="tabs-header">
               <h2>タブ</h2>
-              <button type="button" data-action="toggle-tabs-pin" class="tabs-pin" aria-pressed="true" aria-label="タブ帯のピン止めを外す" title="タブ帯のピン止めを外す">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M8.5 3.5h7l-1 5 3 3v1.5h-4.75V21l-.75 1-.75-1v-8H6.5v-1.5l3-3-1-5Z" />
-                </svg>
-              </button>
             </header>
             <div id="tab-list" role="tablist" aria-orientation="vertical"></div>
             <button data-action="new-tab" class="new-tab" aria-label="新しいタブで新規">+</button>
           </aside>
-          <section id="editor" class="editor-host" aria-label="Markdown編集欄"></section>
+          <section id="editor" class="editor-host" aria-label="Markdown編集欄"><div id="empty-hint" class="empty-hint"><p>ここから書き始める</p><span>そのまま入力できます。Ctrl+Oで開く · Ctrl+Sで初回保存</span></div></section>
           <aside id="outline" class="outline-panel" aria-label="目次" hidden>
             <header class="outline-header">
               <h2>目次</h2>
@@ -674,6 +676,7 @@ export class MarkdownQuickMemoApplication {
             <nav id="outline-list" class="outline-list" aria-label="文書の見出し"></nav>
           </aside>
         </section>
+        <footer class="statusbar" aria-label="文書情報"><span id="cursor-position">1行 1列</span><span id="status">0 文字 / 0 語</span><span id="navigation-status" role="status"></span></footer>
       </main>
       <article id="print-root" class="print-root" aria-hidden="true"></article>
       <dialog id="image-dialog" class="image-dialog">
@@ -702,6 +705,7 @@ export class MarkdownQuickMemoApplication {
     this.root.addEventListener(
       "keydown",
       (event) => {
+        if (this.handleMenuKey(event)) return;
         if (this.handleTabShortcut(event)) return;
         this.handleOutlineNavigationShortcut(event);
         this.handlePanelWidthShortcut(event);
@@ -794,6 +798,17 @@ export class MarkdownQuickMemoApplication {
 
   private async runAction(action: string): Promise<void> {
     if (this.operationPending || this.exitLocked) return;
+    if (["shortcuts", "commands"].includes(action)) {
+      this.required("#command-menu").hidden = action === "shortcuts";
+      this.required("#shortcut-list").hidden = action === "commands";
+      this.menuButtons()[0]?.focus();
+      return;
+    }
+    if (action !== "more" && !this.required("#more-menu").hidden) {
+      this.hideMoreMenu();
+      this.editor.focus();
+    }
+    if (this.editor.state.readOnly && ["undo", "redo", "insert-table", "bold", "italic", "strike"].includes(action)) return;
     const actions: Record<string, () => void | Promise<void>> = {
       new: () => this.performOperation(() => this.newDocument()),
       open: () => this.performOperation(() => this.openDocument()),
@@ -806,6 +821,14 @@ export class MarkdownQuickMemoApplication {
       "save-as": async () => {
         await this.saveDocument(true);
       },
+      "retry-save": async () => { await this.saveDocument(false); },
+      undo: () => { undo(this.editor); },
+      redo: () => { redo(this.editor); },
+      search: () => { openSearchPanel(this.editor); },
+      "insert-table": () => this.insertTable(),
+      bold: () => this.wrapSelection("**"),
+      italic: () => this.wrapSelection("*"),
+      strike: () => this.wrapSelection("~~"),
       rename: () => this.performOperation(() => this.renameDocument()),
       reveal: () => this.revealDocument(),
       "export-pdf": () => this.performOperation(() => this.exportPdf()),
@@ -813,7 +836,8 @@ export class MarkdownQuickMemoApplication {
       opacity: () => this.toggleOpacity(),
       settings: () => this.showSettings(),
       "apply-hotkey": () => this.applyHotkey(),
-      "toggle-tabs-pin": () => this.toggleTabsPinned(),
+      "toggle-tabs": () => this.togglePanel("tabs"),
+      "toggle-outline": () => this.togglePanel("outline"),
       "window-minimize": () => getCurrentWindow().minimize(),
       "window-maximize": () => getCurrentWindow().toggleMaximize(),
       "window-close": () => getCurrentWindow().close(),
@@ -825,9 +849,6 @@ export class MarkdownQuickMemoApplication {
       "close-image": () => this.imageDialog.close(),
     };
     await actions[action]?.();
-    if (action !== "more") {
-      this.hideMoreMenu();
-    }
   }
 
   private async handleShortcut(event: KeyboardEvent): Promise<void> {
@@ -1025,15 +1046,24 @@ export class MarkdownQuickMemoApplication {
         }
         requestedPath = selected;
       }
+      tab.savePending = true;
+      this.updateSaveStatus();
       const result = await backend.saveDocument(tab.editor.state.doc.toString(), tab.revision.current, requestedPath, tab.id);
       tab.path = result.path;
+      tab.saveError = null;
       const accepted = tab.revision.acceptSavedRevision(result.revision);
       this.updateTitle();
       if (!accepted) this.scheduleAutoSave(tab);
       return accepted;
     } catch (error) {
+      tab.savePending = false;
+      tab.saveError = error instanceof Error ? error.message : String(error);
+      this.updateSaveStatus();
       await this.showError("保存できませんでした", error);
       return false;
+    } finally {
+      tab.savePending = false;
+      this.updateSaveStatus();
     }
   }
 
@@ -1206,9 +1236,11 @@ export class MarkdownQuickMemoApplication {
     this.suppressChanges = false;
     this.currentPath = path;
     this.revision.reset();
+    this.activeTab.saveError = null;
     this.collapsedOutlineKeys.clear();
     this.updateTitle();
     this.updateDocumentSummary(content);
+    this.updateEmptyHint();
   }
 
   private loadPayload(payload: DocumentPayload): void {
@@ -1222,6 +1254,29 @@ export class MarkdownQuickMemoApplication {
     this.title.title = this.currentPath ?? name;
     document.title = `${dirtyMarker}${name} — ${DEFAULT_TITLE}`;
     this.renderTabs();
+    this.updateSaveStatus();
+  }
+
+  private updateSaveStatus(): void {
+    const tab = this.activeTab;
+    const state = tab.savePending ? "saving" : tab.saveError ? "error" : !tab.path || tab.revision.dirty ? "unsaved" : "saved";
+    const label = state === "saving" ? "保存中" : state === "error" ? "保存失敗" : state === "saved" ? "保存済み" : tab.path ? "未保存" : "未保存 · 初回保存";
+    const status = this.required("#save-status");
+    if (status.textContent !== label) status.textContent = label;
+    status.dataset.state = state;
+    status.title = !tab.path ? "Ctrl+Sで保存先を選んでください" : tab.saveError ?? tab.path;
+    const error = this.required("#save-error");
+    error.hidden = !tab.saveError;
+    const errorMessage = this.required("#save-error-message");
+    const errorText = tab.saveError ? `保存できませんでした：${tab.saveError}` : "";
+    if (errorMessage.textContent !== errorText) errorMessage.textContent = errorText;
+    const retry = this.required<HTMLButtonElement>("button[data-action='retry-save']");
+    retry.disabled = tab.savePending;
+    retry.textContent = tab.savePending ? "保存中…" : "再試行";
+  }
+
+  private updateEmptyHint(): void {
+    this.required("#empty-hint").hidden = this.editor.state.doc.length > 0;
   }
 
   private updateDocumentSummary(content: string): void {
@@ -1253,8 +1308,14 @@ export class MarkdownQuickMemoApplication {
     }
     this.outlineList.replaceChildren(...this.renderOutlineNodes(tree));
     const hasOutline = headings.length > 0;
-    this.outline.hidden = !hasOutline;
-    this.workspace.classList.toggle("has-outline", hasOutline);
+    this.outline.hidden = this.outlineVisible === false || (!hasOutline && this.outlineVisible !== true);
+    if (!hasOutline) {
+      const empty = document.createElement("p");
+      empty.className = "outline-empty";
+      empty.textContent = "見出しを入力すると目次が表示されます。";
+      this.outlineList.append(empty);
+    }
+    this.workspace.classList.toggle("has-outline", !this.outline.hidden);
     this.updateTabPanel();
     if (!hasOutline && this.outlineNavigationActive) {
       this.stopOutlineNavigation();
@@ -1352,16 +1413,23 @@ export class MarkdownQuickMemoApplication {
       return;
     }
     this.outlineNavigationActive = true;
+    this.outlineVisible = true;
+    if (window.innerWidth < 1200) this.tabsVisible = false;
+    this.outline.hidden = false;
+    this.workspace.classList.add("has-outline");
     this.outline.classList.add("outline-navigation-active");
+    this.updateTabPanel();
     this.selectOutlineButton(first, true);
   }
 
   private stopOutlineNavigation(): void {
+    if (this.outlineNavigationActive && this.outlineVisible !== false) this.outlineVisible = null;
     this.outlineNavigationActive = false;
     this.selectedOutlineKey = null;
     this.outline.classList.remove("outline-navigation-active");
     this.resetOutlineNavigationHold();
     this.applyOutlineSelectionState();
+    this.updatePanelControls();
     this.editor.focus();
   }
 
@@ -1458,6 +1526,46 @@ export class MarkdownQuickMemoApplication {
       "tabs-auto-collapsed",
       this.workspace.clientWidth - fixedOutline - this.tabsWidth < MIN_EDITOR_WIDTH,
     );
+    this.updatePanelControls();
+  }
+
+  private updatePanelControls(): void {
+    const tabsOpen = this.tabsVisible ?? !this.workspace.classList.contains("tabs-auto-collapsed");
+    const outlineOpen = this.outlineVisible ?? (!this.outline.hidden && window.innerWidth >= 1200);
+    for (const [panel, open, explicit, shortcut] of [
+      ["tabs", tabsOpen, this.tabsVisible, "Ctrl+K"],
+      ["outline", outlineOpen, this.outlineVisible, "Ctrl+L"],
+    ] as const) {
+      this.workspace.classList.toggle(`${panel}-closed`, explicit === false);
+      this.workspace.classList.toggle(`${panel}-open`, explicit === true);
+      const element = this.required(`#${panel}`);
+      element.toggleAttribute("inert", !open);
+      const button = this.required<HTMLButtonElement>(`button[data-action='toggle-${panel}']`);
+      button.setAttribute("aria-expanded", String(open));
+      const name = panel === "tabs" ? "タブ" : "目次";
+      button.title = `${name}を${open ? "閉じる" : "開く"}（${shortcut}で操作）`;
+      button.setAttribute("aria-label", button.title);
+    }
+    this.required("#navigation-status").textContent = this.tabsNavigationActive
+      ? "タブを操作中 · Enter / Escで本文へ" : this.outlineNavigationActive ? "目次を操作中 · Ctrl+Lで本文へ" : "";
+  }
+
+  private togglePanel(panel: "tabs" | "outline"): void {
+    const button = this.required<HTMLButtonElement>(`button[data-action='toggle-${panel}']`);
+    const open = button.getAttribute("aria-expanded") !== "true";
+    if (panel === "tabs") {
+      this.tabsVisible = open;
+      if (!open) this.stopTabNavigation();
+      else if (window.innerWidth < 1200) this.outlineVisible = false;
+    } else {
+      this.outlineVisible = open;
+      if (!open) this.stopOutlineNavigation();
+      else if (window.innerWidth < 1200) this.tabsVisible = false;
+      this.outline.hidden = !open;
+      this.workspace.classList.toggle("has-outline", open);
+    }
+    this.updateTabPanel();
+    this.editor.focus();
   }
 
   private updateTabsWidth(delta: number): void {
@@ -1592,6 +1700,9 @@ export class MarkdownQuickMemoApplication {
     );
     const label = enabled ? "編集モードに切り替える" : "閲覧モードに切り替える";
     button.replaceChildren(modeIcon(enabled));
+    const mode = document.createElement("span");
+    mode.textContent = enabled ? "閲覧" : "編集";
+    button.append(mode);
     button.setAttribute("aria-label", label);
     button.title = label;
     button.setAttribute("aria-pressed", String(enabled));
@@ -1635,19 +1746,48 @@ export class MarkdownQuickMemoApplication {
 
   private toggleMoreMenu(): void {
     const menu = this.required("#more-menu");
-    menu.hidden = !menu.hidden;
+    if (!menu.hidden) { this.hideMoreMenu(true); return; }
+    menu.hidden = false;
+    this.required("#command-menu").hidden = false;
+    this.required("#shortcut-list").hidden = true;
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>("[data-edit-command]")) {
+      button.disabled = this.editor.state.readOnly;
+    }
     this.required<HTMLButtonElement>("button[data-action='more']").setAttribute(
       "aria-expanded",
       String(!menu.hidden),
     );
+    this.menuButtons()[0]?.focus();
   }
 
-  private hideMoreMenu(): void {
+  private hideMoreMenu(restoreFocus = false): void {
     this.required("#more-menu").hidden = true;
     this.required<HTMLButtonElement>("button[data-action='more']").setAttribute(
       "aria-expanded",
       "false",
     );
+    if (restoreFocus) this.required<HTMLButtonElement>("button[data-action='more']").focus();
+  }
+
+  private menuButtons(): HTMLButtonElement[] {
+    const view = this.required("#command-menu").hidden ? "#shortcut-list" : "#command-menu";
+    return Array.from(this.required(view).querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+  }
+
+  private handleMenuKey(event: KeyboardEvent): boolean {
+    if (this.required("#more-menu").hidden || event.isComposing) return false;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); this.hideMoreMenu(true); return true;
+    }
+    if (event.key === "Tab") { this.hideMoreMenu(true); return false; }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || event.ctrlKey || event.altKey || event.metaKey) return false;
+    const buttons = this.menuButtons();
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+    buttons[next]?.scrollIntoView?.({ block: "nearest" });
+    event.preventDefault(); event.stopPropagation(); return true;
   }
 
   private async showError(title: string, error: unknown): Promise<void> {

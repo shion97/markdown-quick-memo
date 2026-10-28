@@ -1,0 +1,34 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>UI/UX確認用（保存は模擬）</title></head><body><div id="app"></div><script type="module">
+import '/src/styles.css';
+import 'katex/dist/katex.min.css';
+import { MarkdownQuickMemoApplication } from '/src/app.ts';
+import { backend } from '/src/bridge/tauri.ts';
+const params = new URLSearchParams(location.search);
+window.__TAURI_INTERNALS__ = { invoke: async (command) => command === 'plugin:dialog|save' ? 'C:\\確認用メモ.md' : null };
+backend.saveDocument = async (_content, revision, path) => {
+  await new Promise(resolve => setTimeout(resolve, 600));
+  if (params.has('error')) throw new Error('確認用：保存先への書き込み権限がありません。保存先を確認して再試行してください。');
+  return {path, revision};
+};
+const app = new MarkdownQuickMemoApplication(document.querySelector('#app'));
+const sample = '# 開発ノートと次回の検討事項\n\n画面確認用のサンプルです。Markdown原文を保ち、いつでも読み書きを再開できます。\n\n## 今回の判断\n\n保存状態とパネル操作を分かりやすくします。 **強調**、*斜体*、[公式資料](https://example.com)も確認します。\n\n| 項目 | 方針 |\n| --- | --- |\n| 保存 | 1秒後に自動保存 |\n| 目次 | 見出しから生成 |\n\n## 次回に試すコード\n\n```typescript\nfunction square(value: number) {\n  return value * value;\n}\n```\n\n## 数式\n\n$$E = mc^2$$\n\n';
+if (!params.has('empty')) {
+  app.setDocument('短いメモ', 'C:\\アイデア.md');
+  app.createTab(); app.setDocument('確認事項', 'C:\\リリース前チェックリスト.md');
+  app.createTab(); app.setDocument(sample + (params.has('long') ? Array.from({length:40}, (_,index) => `\n## 長い見出しと検討事項 ${index+1}\n\n日本語の長文でも入力とスクロールを妨げないことを確認します。\n`).join('') : ''), 'C:\\開発ノートと次回の検討事項と引き継ぎのための長いファイル名.md');
+  app.activeTab.editor.dispatch({selection:{anchor:app.activeTab.editor.state.doc.length}});
+}
+if (params.get('theme') === 'dark') {
+  for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) {
+    if (rule.conditionText === '(prefers-color-scheme: dark)') for (const nested of rule.cssRules) {
+      if (nested.selectorText === ':root') document.documentElement.style.cssText += nested.style.cssText;
+    }
+  }
+}
+if (params.has('menu') || params.has('shortcuts')) document.querySelector('button[data-action="more"]').click();
+if (params.has('shortcuts')) document.querySelector('button[data-action="shortcuts"]').click();
+if (params.has('tabs')) document.querySelector('button[data-action="toggle-tabs"]').click();
+if (params.has('outline')) document.querySelector('button[data-action="toggle-outline"]').click();
+if (params.has('error')) app.activeTab.editor.dispatch({changes:{from:0,insert:'確認用の変更\n\n'}});
+document.title = 'UI/UX確認用（保存は模擬）';
+</script></body></html>
