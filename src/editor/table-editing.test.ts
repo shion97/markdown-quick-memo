@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { history, undo, redo } from "@codemirror/commands";
+import { defaultKeymap, history, undo, redo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
-import { EditorView, runScopeHandlers } from "@codemirror/view";
+import { EditorView, keymap, runScopeHandlers } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { markdownDecorations } from "./decorations";
@@ -20,7 +20,7 @@ function create(sourceText = source, position = sourceText.indexOf("項目"), re
   document.body.append(parent);
   const view = new EditorView({ parent, state: EditorState.create({ doc: sourceText, selection: { anchor: position }, extensions: [
     markdown({ base: markdownLanguage, extensions: [GFM] }), history(),
-    tableEditing({ onInsertTable: vi.fn() }), markdownInputAssistance(), markdownDecorations,
+    tableEditing({ onInsertTable: vi.fn() }), markdownInputAssistance(), markdownDecorations, keymap.of(defaultKeymap),
     EditorState.readOnly.of(readOnly),
   ] }) });
   views.push(view);
@@ -32,6 +32,92 @@ function press(view: EditorView, key: string, shiftKey = false): boolean {
 afterEach(() => { views.splice(0).forEach(view => view.destroy()); vi.useRealTimers(); document.body.replaceChildren(); });
 
 describe("表の編集", () => {
+  it.each(["Enter", "ArrowDown"])("最下行の%sは空行のない末尾から抜け、Undoで戻せる", key => {
+    const view = create(source, source.indexOf("別名"));
+    expect(press(view, key)).toBe(true);
+    expect(view.state.doc.toString()).toBe(source + "\n\n");
+    expect(view.state.selection.main.head).toBe(view.state.doc.length);
+    expect(findTable(view.state, view.state.selection.main.head)).toBeNull();
+    undo(view);
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it.each(["\n\n本文", "\n本文", "\n\n| 次 |\n| --- |"])("最下行から抜けても後続の本文を保持する: %s", suffix => {
+    const view = create(source + suffix, source.indexOf("10"));
+    press(view, "ArrowDown");
+    expect(view.state.doc.lineAt(view.state.selection.main.head).text).toBe("");
+    expect(view.state.doc.toString()).toBe(source + (suffix.startsWith("\n\n") ? suffix : "\n" + suffix));
+  });
+
+  it("下矢印は区切り線を飛ばして同じ列へ移動する", () => {
+    const view = create(source, source.indexOf("値"));
+    press(view, "ArrowDown");
+    expect(view.state.selection.main.head).toBe(source.indexOf("2"));
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it.each(["項目", "名前", "別名"])("%sの先頭でBackspaceしても構造を削除しない", text => {
+    const view = create(source, source.indexOf(text));
+    press(view, "Backspace");
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it("通常のBackspaceはセル本文を削除し、空になっても表を保持する", () => {
+    const view = create(source, source.indexOf("名前") + 2);
+    press(view, "Backspace");
+    expect(view.state.doc.toString()).toBe(source.replace("名前", "名"));
+    press(view, "Backspace");
+    expect(view.state.doc.toString()).toBe(source.replace("名前", ""));
+    press(view, "Backspace");
+    expect(view.state.doc.toString()).toBe(source.replace("名前", ""));
+    expect(findTable(view.state, 0)?.rows).toHaveLength(3);
+  });
+
+  it.each(["Backspace", "Delete"])("セルをまたぐ文字選択の%sは本文だけ消去する", key => {
+    const view = create();
+    view.dispatch({ selection: { anchor: source.indexOf("項目"), head: source.indexOf("別名") + 2 } });
+    press(view, key);
+    expect(findTable(view.state, 0)?.rows.map(row => row.cells.map(cell => cell.text))).toEqual([["", ""], ["", ""], ["", "10"]]);
+    undo(view);
+    expect(view.state.doc.toString()).toBe(source);
+  });
+
+  it("セル末尾のDeleteと空セルのBackspaceは区切りを保持する", () => {
+    const view = create(source, source.indexOf("項目") + 2);
+    press(view, "Delete");
+    expect(view.state.doc.toString()).toBe(source);
+    const empty = create("|  |  |\n| --- | --- |\n|  |  |", 2);
+    press(empty, "Backspace");
+    expect(empty.state.doc.toString()).toBe("|  |  |\n| --- | --- |\n|  |  |");
+  });
+
+  it.each(["Backspace", "Delete"])("%sでエスケープを消してもパイプを列区切りにしない", key => {
+    const text = "| a\\|b | c |\n| --- | --- |";
+    const view = create(text, text.indexOf("\\") + (key === "Backspace" ? 1 : 0));
+    press(view, key);
+    expect(view.state.doc.toString()).toBe("| ab | c |\n| --- | --- |");
+    expect(findTable(view.state, 0)?.columns).toBe(2);
+  });
+
+  it("閲覧モードで最下行のEnterと下矢印を押しても原文を変更しない", () => {
+    for (const key of ["Enter", "ArrowDown", "Backspace"]) {
+      const view = create(source, source.indexOf("別名"), true);
+      press(view, key);
+      expect(view.state.doc.toString()).toBe(source);
+    }
+  });
+
+  it("数式内の削除位置を維持し、数式の区切りを消しても列数を維持する", () => {
+    const text = "| $a|b$ | c |\n| --- | --- |";
+    const view = create(text, text.indexOf("b") + 1);
+    press(view, "Backspace");
+    expect(view.state.doc.toString()).toBe(text.replace("b", ""));
+    expect(view.state.selection.main.head).toBe(text.indexOf("b"));
+    view.dispatch({ selection: { anchor: 2 } });
+    press(view, "Delete");
+    expect(findTable(view.state, 0)?.columns).toBe(2);
+  });
+
   it("Tabで区切り線を飛ばし、末尾では行を追加する。1回のUndoで戻せる", () => {
     const view = create();
     press(view, "Tab");

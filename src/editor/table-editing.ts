@@ -1,7 +1,7 @@
 import { isolateHistory } from "@codemirror/commands";
-import { EditorState, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { EditorState, Prec, StateEffect, StateField, findClusterBreak, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
-import { clipboardCellText, findTable, markdownCellText, readClipboardTable, serializeTable, tableMatrix, tableMathRanges, tableRowRanges, type MarkdownTable, type TableAlignment } from "./tables";
+import { clipboardCellText, findTable, markdownCellText, readClipboardTable, serializeTable, tableMatrix, tableMathRanges, tableRowRanges, type MarkdownTable, type TableAlignment, type TableCellRange } from "./tables";
 
 export interface CellCoordinate { row: number; column: number }
 interface TableInteraction {
@@ -104,6 +104,7 @@ function navigate(view: EditorView, direction: "next" | "previous" | "down"): bo
   else { column -= 1; if (column < 0) { column = table.columns - 1; row -= 1; } }
   if (row < 0) { moveTo(view, table, { row: 0, column: 0 }); return true; }
   if (row >= table.rows.length) {
+    if (direction === "down") return exitTable(view, false);
     if (view.state.readOnly) return true;
     const rows = tableMatrix(table);
     rows.push(Array.from({ length: table.columns }, () => ""));
@@ -132,11 +133,11 @@ function lineBreak(view: EditorView): boolean {
   return true;
 }
 
-function exitTable(view: EditorView): boolean {
+function exitTable(view: EditorView, deselectOnly = true): boolean {
   if (view.composing) return false;
   const current = context(view);
   if (!current) return false;
-  if (view.state.field(tableInteraction, false)?.selected) {
+  if (deselectOnly && view.state.field(tableInteraction, false)?.selected) {
     moveTo(view, current.table, current.cell);
     return true;
   }
@@ -171,6 +172,53 @@ function clearCells(view: EditorView): boolean {
   const area = bounds(interaction);
   for (let row = area.top; row <= area.bottom; row += 1) for (let column = area.left; column <= area.right; column += 1) rows[row]![column] = "";
   replaceTable(view, current.table, rows, current.table.alignments, interaction.head, true);
+  return true;
+}
+
+function cellDeletion(cell: TableCellRange, from: number, to: number) {
+  let start = from - cell.from;
+  let end = to - cell.from;
+  // An escaped pipe must stay escaped or be deleted with its escape.
+  for (const match of cell.text.matchAll(/\\+\|/g)) {
+    const pipe = match.index + match[0].length - 1;
+    if ((match[0].length - 1) % 2 === 1 && start < pipe + 1 && end > pipe - 1) {
+      start = Math.min(start, pipe - 1);
+      end = Math.max(end, pipe + 1);
+    }
+  }
+  const remaining = cell.text.slice(0, start) + cell.text.slice(end);
+  const insert = markdownCellText(remaining);
+  let cursorOffset = 0;
+  for (let offset = 0; offset < start; offset += 1) {
+    if (remaining[offset] === "|" && insert[cursorOffset] === "\\") cursorOffset += 1;
+    cursorOffset += 1;
+  }
+  return { from: cell.from, to: cell.to, insert, cursor: cell.from + cursorOffset };
+}
+
+function deleteCellText(view: EditorView, forward: boolean): boolean {
+  if (view.composing) return false;
+  if (clearCells(view)) return true;
+  const current = context(view);
+  if (!current) return false;
+  if (view.state.readOnly) return true;
+  const { table, cell } = current;
+  const selection = view.state.selection.main;
+  if (selection.empty) {
+    const existing = table.rows[cell.row]!.cells[cell.column];
+    if (!existing || selection.head < existing.from || selection.head > existing.to) return true;
+    const offset = selection.head - existing.from;
+    const target = existing.from + findClusterBreak(existing.text, offset, forward, forward);
+    if (target === selection.head) return true;
+    const change = cellDeletion(existing, Math.min(target, selection.head), Math.max(target, selection.head));
+    view.dispatch({ changes: change, selection: { anchor: change.cursor }, userEvent: forward ? "delete.forward" : "delete.backward" });
+  } else {
+    const changes = table.rows.flatMap(row => row.cells.flatMap(existing => {
+      const from = Math.max(existing.from, selection.from), to = Math.min(existing.to, selection.to);
+      return from < to ? [cellDeletion(existing, from, to)] : [];
+    }));
+    if (changes.length) view.dispatch({ changes, selection: { anchor: changes[0]!.cursor }, userEvent: "delete.selection" });
+  }
   return true;
 }
 
@@ -280,10 +328,11 @@ interface TableCallbacks { onInsertTable: () => void }
 export function tableEditing(callbacks: TableCallbacks): Extension {
   return [tableInteraction, Prec.highest(keymap.of([
     { key: "Tab", run: view => navigate(view, "next") }, { key: "Shift-Tab", run: view => navigate(view, "previous") },
-    { key: "Enter", run: view => navigate(view, "down") }, { key: "Shift-Enter", run: lineBreak }, { key: "Escape", run: exitTable },
+    { key: "Enter", run: view => navigate(view, "down") }, { key: "ArrowDown", run: view => navigate(view, "down") },
+    { key: "Shift-Enter", run: lineBreak }, { key: "Escape", run: view => exitTable(view) },
     { key: "Shift-ArrowUp", run: view => extendSelection(view, -1, 0) }, { key: "Shift-ArrowDown", run: view => extendSelection(view, 1, 0) },
     { key: "Shift-ArrowLeft", run: view => extendSelection(view, 0, -1) }, { key: "Shift-ArrowRight", run: view => extendSelection(view, 0, 1) },
-    { key: "Delete", run: clearCells }, { key: "Backspace", run: clearCells },
+    { key: "Delete", run: view => deleteCellText(view, true) }, { key: "Backspace", run: view => deleteCellText(view, false) },
   ])), ViewPlugin.fromClass(class {
     private menu: HTMLElement | null = null;
     private menuParent: HTMLElement | null = null;

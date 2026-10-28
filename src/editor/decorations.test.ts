@@ -62,6 +62,20 @@ afterEach(() => {
 });
 
 describe("markdownDecorations", () => {
+  it("表の上下の余白を行高に含め、後続行の座標計算をずらさない", () => {
+    loadApplicationStyles();
+    const parent = renderDocument("| a | b |\n| --- | --- |\n| x | y |\n\n本文");
+    const first = window.getComputedStyle(parent.querySelector(".mqm-table-row-start")!);
+    const last = window.getComputedStyle(parent.querySelector(".mqm-table-row-end")!);
+    expect(parseFloat(first.marginTop)).toBe(0);
+    expect(parseFloat(last.marginBottom)).toBe(0);
+    // jsdom does not resolve shorthand/longhand !important precedence like browsers.
+    const rules = Array.from(document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules))
+      .filter(rule => rule instanceof window.CSSStyleRule);
+    expect(rules.find(rule => rule.selectorText === ".mqm-table-row-start")!.style.getPropertyValue("padding-top")).toBe("0.7em");
+    expect(rules.find(rule => rule.selectorText === ".mqm-table-row-end")!.style.getPropertyValue("padding-bottom")).toBe("0.7em");
+  });
+
   it.each([
     "$[a](b) + <x> + a_b + c_d$",
     "\\([a](b) + <x> + a_b + c_d\\)",
