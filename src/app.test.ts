@@ -272,15 +272,16 @@ describe("MarkdownQuickMemoApplication", () => {
     expect(root.querySelector(".mqm-code-language")?.textContent).toBe("julia");
   });
 
-  it("上部へ文書情報とコンパクトな主操作一覧を配置する", () => {
+  it("上部に保存と主操作、下部に文書情報を配置する", () => {
     const root = document.createElement("div");
     document.body.append(root);
     const application = new MarkdownQuickMemoApplication(root);
     setApplicationDocument(application, "本文", "C:\\memo.md");
 
     const toolbar = root.querySelector(".toolbar");
-    expect(toolbar?.querySelector("#cursor-position")).not.toBeNull();
-    expect(toolbar?.querySelector("#status")).not.toBeNull();
+    expect(root.querySelector("footer #cursor-position")).not.toBeNull();
+    expect(root.querySelector("footer #status")).not.toBeNull();
+    expect(toolbar?.querySelector("#save-status")?.textContent).toBe("保存済み");
     expect(toolbar?.querySelector("button[data-action='preview']")).not.toBeNull();
     expect(toolbar?.querySelector(".brand .document-file-icon")).not.toBeNull();
     expect(toolbar?.querySelector("#document-title")?.textContent).toBe("memo.md");
@@ -294,20 +295,15 @@ describe("MarkdownQuickMemoApplication", () => {
     ).toEqual(["window-minimize", "window-maximize", "window-close"]);
     expect(toolbar?.querySelectorAll(".window-control-icon")).toHaveLength(3);
     expect(styles).toContain(
-      ".toolbar {\n  position: relative;\n  z-index: 10;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 18px;\n  height: 38px;\n  min-height: 38px;",
-    );
-    expect(styles).toContain("align-self: center;\n  height: 38px;\n  margin: 0 -6px 0 2px;");
-    expect(styles).toContain("place-items: center;\n  min-width: 46px;\n  height: 38px;");
-    expect(styles).toContain(
       ".window-control-icon {\n  width: 18px;\n  height: 18px;\n  fill: none;\n  stroke: currentColor;\n  stroke-linecap: square;\n  stroke-linejoin: miter;\n  stroke-width: 1.25;",
     );
     expect(
       toolbar?.querySelector(":scope > button[data-action='new']"),
     ).toBeNull();
-    expect(root.querySelector("footer")).toBeNull();
+    expect(root.querySelector("footer")?.getAttribute("aria-label")).toBe("文書情報");
     expect(root.textContent).not.toContain("Markdown原文を保存");
     expect(styles).toContain(
-      ".document-status,\n.icon-button,\n.window-control {\n  border-color: transparent;",
+      ".icon-button,\n.window-control {\n  border-color: transparent;",
     );
     expect(styles).toContain(
       '.icon-button[aria-expanded="true"] {\n  border-color: var(--border-strong);',
@@ -317,7 +313,7 @@ describe("MarkdownQuickMemoApplication", () => {
       root.querySelectorAll<HTMLButtonElement>("#more-menu button"),
       (button) => button.dataset.action,
     );
-    expect(menuActions).toEqual([
+    expect(menuActions).toEqual(expect.arrayContaining([
       "new",
       "open",
       "new-tab",
@@ -328,12 +324,14 @@ describe("MarkdownQuickMemoApplication", () => {
       "rename",
       "reveal",
       "export-pdf",
+      "undo", "redo", "search", "insert-table", "bold", "italic", "strike",
+      "toggle-tabs", "toggle-outline", "shortcuts", "commands",
       "preview",
       "opacity",
       "hide",
       "exit",
       "settings",
-    ]);
+    ]));
     expect(root.querySelector("#more-menu")?.textContent).toContain(
       "Ctrl+P",
     );

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown Quick Memo — 青い索引案</title>
+  <style>
+    :root{--shell:#12223d;--shell-2:#1a3155;--rail:#eaf0f8;--rail-2:#f4f7fb;--paper:#fff;--editor:#f7f9fc;--text:#17243b;--muted:#52637a;--line:#cfdaea;--accent:#245cc4;--accent-ink:#123d8f;--selected:#dce9ff;--code:#f1f5fb;--shadow:0 12px 28px rgb(19 49 92 / 12%)}
+    @media (prefers-color-scheme:dark){:root{--shell:#0d172b;--shell-2:#142645;--rail:#15243c;--rail-2:#1a2b47;--paper:#202c40;--editor:#172337;--text:#ecf3ff;--muted:#aebbd0;--line:#344a68;--accent:#8fb5ff;--accent-ink:#c8d9ff;--selected:#29466f;--code:#182337;--shadow:0 18px 36px rgb(0 0 0 / 30%)}}
+    *{box-sizing:border-box}html,body{height:100%;margin:0}body{overflow:hidden;background:var(--rail);color:var(--text);font:14px/1.55 "Segoe UI Variable Text","Yu Gothic UI","BIZ UDGothic",sans-serif}button,a{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.7}
+    .app{display:grid;height:100vh;grid-template-rows:54px minmax(0,1fr) 28px;background:var(--rail)}
+    .toolbar{display:flex;align-items:center;gap:14px;padding:0 10px 0 14px;color:#f4f8ff;background:var(--shell);border-bottom:1px solid #29466f}.tool-left,.tool-right,.window-controls{display:flex;align-items:center;gap:8px}.tool-left{min-width:0;flex:1}.tool-right{flex:0 0 auto}.icon-btn{display:grid;place-items:center;width:32px;height:32px;padding:0;color:inherit;border:1px solid transparent;border-radius:6px;background:transparent}.icon-btn:hover{background:rgb(255 255 255 / 12%)}.file-glyph{display:grid;place-items:center;width:24px;height:24px;color:#a7c5ff}.file-title{display:flex;align-items:baseline;gap:10px;min-width:0}.file-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}.variant{color:#b6c8e4;font-size:12px;white-space:nowrap}.doc-status,.mode{padding:4px 8px;border:1px solid rgb(255 255 255 / 20%);border-radius:999px;color:#d9e7ff;font-size:12px;white-space:nowrap}.doc-status{border-color:#3e70c8;background:#1e4d9d}.mode{color:#cbd9ee}.menu{margin-left:2px}.window-controls{height:54px;margin-right:-10px;gap:0}.window-controls .icon-btn{width:44px;height:54px;border-radius:0}.window-controls .close:hover{background:#c42b1c;color:#fff}
+    .workspace{display:grid;min-height:0;grid-template-columns:240px minmax(0,1fr) 240px}.rail,.outline{min-width:0;overflow:auto;background:var(--rail);border-color:var(--line)}.rail{padding:18px 12px;border-right:1px solid var(--line)}.outline{padding:20px 16px;background:var(--rail-2);border-left:1px solid var(--line)}.rail-head,.outline-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 14px}.rail h2,.outline h2{margin:0;color:var(--accent-ink);font-size:12px;letter-spacing:.08em;font-weight:700}.count{color:var(--muted);font-size:12px}.tab-list{display:grid;gap:4px}.tab{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start;padding:9px 8px;color:var(--text);text-decoration:none;border:1px solid transparent;border-radius:7px}.tab:hover{background:var(--rail-2)}.tab.active{border-color:#b4c9e8;background:var(--selected);color:var(--accent-ink)}.tab small{grid-column:2;color:var(--muted);font-size:12px}.file-type{padding-top:1px;color:var(--accent);font:700 12px/1 "Cascadia Mono","Consolas",monospace;letter-spacing:.04em}.empty-compare{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.empty-compare summary{cursor:pointer;color:var(--accent-ink);font-weight:650}.empty-compare a{display:block;margin-top:9px;color:var(--accent);font-size:12px}.empty-compare p{margin:5px 0 0;line-height:1.45}
+    .editor{min-width:0;min-height:0;overflow:auto;background:var(--rail-2)}.paper{max-width:790px;min-height:100%;margin:0 auto;padding:42px 58px 76px;background:var(--paper);box-shadow:var(--shadow)}.paper h1{margin:0 0 12px;color:var(--accent-ink);font-size:30px;letter-spacing:-.025em;line-height:1.22}.paper h2{margin:30px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--line);color:var(--accent-ink);font-size:19px;line-height:1.35}.paper p{max-width:70ch;margin:0 0 14px}.lede{color:var(--muted);font-size:15px}.meta-line{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px;color:var(--muted);font-size:12px}.meta-line span{padding:3px 7px;border:1px solid var(--line);border-radius:999px}.table-wrap{overflow:auto;margin:12px 0 18px;border:1px solid var(--line);border-radius:7px}.paper table{width:100%;border-collapse:collapse;font-size:13px}.paper th,.paper td{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left}.paper th{color:var(--accent-ink);background:var(--code);font-weight:700}.paper tr:last-child td{border-bottom:0}.code-label{margin:14px 0 5px;color:var(--muted);font:12px "Cascadia Mono","Consolas",monospace}.paper pre{margin:0;padding:14px 16px;overflow:auto;border:1px solid var(--line);border-radius:7px;color:var(--text);background:var(--code);font:12px/1.65 "Cascadia Mono","Consolas",monospace}.tok-key{color:var(--text)}.tok-fn{color:var(--accent)}.tok-str{color:var(--text)}.math{display:block;margin:14px 0;padding:12px 14px;overflow:auto;color:var(--accent-ink);border:1px solid #b9cbe7;background:var(--rail);font:16px/1.6 "Cambria Math","Times New Roman",serif;text-align:center}.outline nav{display:grid;gap:2px}.outline a{padding:7px 8px;color:var(--muted);text-decoration:none;border-radius:6px;font-size:12px}.outline a:hover{background:var(--rail)}.outline a.current{color:var(--accent-ink);background:var(--selected);font-weight:650}.outline .sub{padding-left:20px;font-size:12px}.statusbar{display:flex;align-items:center;gap:18px;padding:0 14px;color:#c9d9ef;background:var(--shell-2);font-size:12px}.statusbar strong{color:#fff;font-variant-numeric:tabular-nums}.statusbar .tail{margin-left:auto;color:#adc0dd}
+    .tabs-toggle,.outline-toggle{display:grid}@media (max-width:1100px){.app{grid-template-rows:54px minmax(0,1fr) 28px}.workspace{grid-template-columns:minmax(0,1fr)}.rail,.outline{display:none}.tabs-toggle,.outline-toggle{display:grid}.variant{display:none}.doc-status{padding-inline:6px}.mode{display:none}.paper{padding:28px 20px 54px;box-shadow:none}.paper h1{font-size:24px}.statusbar{gap:10px;padding-inline:10px}.statusbar .tail{display:none}}
+    @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+    :root:has(#theme-light:checked){--shell:#12223d;--shell-2:#1a3155;--rail:#eaf0f8;--rail-2:#f4f7fb;--paper:#fff;--editor:#f7f9fc;--text:#17243b;--muted:#52637a;--line:#cfdaea;--accent:#245cc4;--accent-ink:#123d8f;--selected:#dce9ff;--code:#f1f5fb;--shadow:0 12px 28px rgb(19 49 92 / 12%)}
+    :root:has(#theme-dark:checked){--shell:#0d172b;--shell-2:#142645;--rail:#15243c;--rail-2:#1a2b47;--paper:#202c40;--editor:#172337;--text:#ecf3ff;--muted:#aebbd0;--line:#344a68;--accent:#8fb5ff;--accent-ink:#c8d9ff;--selected:#29466f;--code:#182337;--shadow:0 18px 36px rgb(0 0 0 / 30%)}
+    .comparison-tools{height:38px;display:flex;align-items:center;gap:12px;padding:4px 12px;background:var(--paper);color:var(--text);border-bottom:1px solid var(--line);font-size:12px}
+    .comparison-tools label{display:flex;align-items:center;gap:3px;white-space:nowrap}
+    .comparison-tools input{accent-color:var(--accent)}
+    .comparison-tools>span{margin-right:auto}
+    .empty-sample summary{cursor:pointer;white-space:nowrap}
+    .empty-sample>div{position:fixed;inset:72px 16px auto auto;z-index:20;width:min(400px,calc(100vw - 32px));padding:24px;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow)}
+    .empty-sample h2{font-size:20px;margin:0 0 12px}
+    .app{height:calc(100vh - 38px)}
+    @media(max-width:1100px){.paper{padding:28px clamp(20px,5vw,58px) 54px}.file-glyph{display:none}}
+    @media(max-width:700px){.variant{display:none}.comparison-tools{gap:5px;font-size:12px}.mode{display:inline-block}.window-controls .icon-btn{width:30px}.toolbar{gap:4px}.tool-right,.tool-left{gap:4px}.file-title{min-width:0}.file-title strong{min-width:0}}
+</style>
+</head>
+<body>
+<div class="comparison-tools" aria-label="画面案の比較用コントロール">
+  <span>画面案用サンプル</span>
+  <label><input type="radio" name="theme" id="theme-system" checked>自動</label>
+  <label><input type="radio" name="theme" id="theme-light">ライト</label>
+  <label><input type="radio" name="theme" id="theme-dark">ダーク</label>
+  <details class="empty-sample"><summary>空文書の案内</summary><div><h2>ここから書き始める</h2><p>そのまま入力できます。</p><p>Ctrl+O で開く · Ctrl+S で初回保存</p><small>案内は本文に挿入しません。</small></div></details>
+</div>
+
+  <div class="app">
+    <header class="toolbar">
+      <div class="tool-left">
+        <button class="icon-btn tabs-toggle" aria-label="タブを表示"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+        <span class="file-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20.5H6zM14 3.5v4h4"/><path d="M8.5 12h7M8.5 15.5h5"/></svg></span>
+        <div class="file-title"><strong>開発ノートと次回の検討事項.md</strong><span class="variant">青い索引案</span></div>
+      </div>
+      <div class="tool-right">
+        <span class="doc-status">保存済み</span><span class="mode">編集モード</span>
+        <button class="icon-btn outline-toggle" aria-label="目次を表示"><svg viewBox="0 0 24 24"><path d="M5 5h14M5 12h14M5 19h9"/><path d="M4 5h.01M4 12h.01M4 19h.01"/></svg></button>
+        <button class="icon-btn menu" aria-label="メニュー"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+        <div class="window-controls" aria-label="ウィンドウ操作"><button class="icon-btn" aria-label="最小化"><svg viewBox="0 0 24 24"><path d="M5 18h14"/></svg></button><button class="icon-btn" aria-label="最大化"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="12" height="13"/></svg></button><button class="icon-btn close" aria-label="閉じる"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button></div>
+      </div>
+    </header>
+    <div class="workspace">
+      <aside class="rail">
+        <div class="rail-head"><h2>文書</h2><span class="count">3件</span></div>
+        <nav class="tab-list" aria-label="開いている文書"><a class="tab active" href="#document"><span class="file-type">MD</span><span>開発ノートと次回の検討事項.md</span><small>保存済み</small></a><a class="tab" href="#document"><span class="file-type">MD</span><span>リリース前チェックリスト.md</span><small>保存済み</small></a><a class="tab" href="#document"><span class="file-type">MD</span><span>アイデアの断片.md</span><small>保存済み</small></a></nav>
+        <details class="empty-compare"><summary>空文書案を比較</summary><a href="#empty-state">新しいメモ（本文なし）</a><p>入力前はタイトルとカーソルだけを見せる状態。</p></details>
+      </aside>
+      <main class="editor" id="document"><article class="paper">
+        <h1>開発ノートと次回の検討事項</h1>
+        <div class="meta-line"><span>更新 2026/10/28</span><span>Markdown</span><span>1,284文字</span></div>
+        <p class="lede">今週の変更を短く振り返り、次回の作業を迷わず再開できるように、決めたことと保留を同じページに残す。</p>
+        <h2>今回の判断</h2>
+        <p>本文は原文のまま保ち、表やコードは読みやすい見た目で確認する。入力を始めた瞬間に編集へ戻れることを優先し、補助パネルは必要なときだけ開く。</p>
+        <div class="table-wrap"><table><thead><tr><th>項目</th><th>決定</th><th>担当</th></tr></thead><tbody><tr><td>保存状態</td><td>1秒後に自動保存</td><td>アプリ</td></tr><tr><td>目次</td><td>見出しから生成</td><td>UI</td></tr><tr><td>表編集</td><td>選択セルから操作</td><td>エディタ</td></tr></tbody></table></div>
+        <h2>次回に試すコード</h2><div class="code-label">typescript / save-note.ts</div><pre><code><span class="tok-key">function</span> <span class="tok-fn">saveDraft</span>(note) {
+  <span class="tok-key">return</span> vault.write(note.path, note.body)
+}</code></pre>
+        <h2>見積もりのメモ</h2><p>数式表示のサンプルとして <span class="math">R(t) = R₀ · e<sup>−λt</sup></span> を表示する。</p>
+      </article></main>
+      <aside class="outline"><div class="outline-head"><h2>目次</h2><span class="count">3章</span></div><nav aria-label="本文の目次"><a class="current" href="#document">開発ノートと次回の検討事項</a><a href="#document">今回の判断</a><a href="#document">次回に試すコード</a><a class="sub" href="#document">save-note.ts</a><a href="#document">見積もりのメモ</a></nav></aside>
+    </div>
+    <footer class="statusbar"><span><strong>1,284</strong> 文字</span><span>行 14 / 列 22</span><span class="tail">自動保存 1秒　•　UTF-8</span></footer>
+  </div>
+</body>
+</html>

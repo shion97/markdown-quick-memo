@@ -183,7 +183,7 @@ function editorTheme(): Extension {
       overflow: "auto",
     },
     ".cm-content": {
-      padding: "26px clamp(24px, 5vw, 72px) 42px",
+        padding: "42px clamp(24px, 5vw, 62px) 76px",
       maxWidth: "1040px",
       margin: "0 auto",
       width: "100%",
